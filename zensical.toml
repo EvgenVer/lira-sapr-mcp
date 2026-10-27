@@ -8,8 +8,11 @@ site_dir = "site"
 nav = [
   "index.md",
   "PRODUCT.md",
-  "TASKS.md",
+  "ARCHITECTURE.md",
+  { "Устройство" = [ "components/server.md", "flows/main-scenario.md" ] },
+  { "Решения" = [ "decisions/0001-architecture.md", "decisions/0002-python-stack.md" ] },
   { "Исследования" = [ "research/lira-api.md" ] },
+  "TASKS.md",
 ]
 
 [project.theme]

@@ -1,4 +1,26 @@
 # Lira-Sapr-MCP
 
-<!-- The overview page. The docs skill fills it in the owner's language: the product in
-     one sentence, a diagram of all parts, stage progress, where to start reading. -->
+MCP-сервер, через который ИИ-агент управляет ЛИРА-САПР на компьютере инженера:
+создаёт и редактирует расчётные модели, запускает расчёт и получает результаты.
+
+```mermaid
+flowchart LR
+  A([MCP-агент]) -->|MCP| T[Инструменты]
+  T --> S[Сервисы]
+  S --> Q[COM-поток]
+  Q --> AD[Адаптер версии]
+  AD -->|COM| L[(ЛИРА-САПР 2024 R2+)]
+```
+
+## Где мы сейчас
+
+- Продукт описан и утверждён — [PRODUCT.md](PRODUCT.md).
+- Архитектура предложена — [ARCHITECTURE.md](ARCHITECTURE.md), ждёт утверждения.
+- Кода пока нет; план — [TASKS.md](TASKS.md), этап 1: тонкий сквозной путь.
+
+## С чего начать чтение
+
+1. [Что мы делаем](PRODUCT.md)
+2. [Как устроено](ARCHITECTURE.md) и [сервер изнутри](components/server.md)
+3. [Главный сценарий](flows/main-scenario.md)
+4. [Что умеет API ЛИРЫ](research/lira-api.md)
