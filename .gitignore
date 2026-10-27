@@ -22,3 +22,6 @@ Desktop.ini
 
 # Spike outputs (LIRA models, logs)
 spikes/out/
+
+# Models written by live LIRA tests
+tests/live/_work/
