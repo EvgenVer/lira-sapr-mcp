@@ -14,6 +14,7 @@ nav = [
   { "Решения" = [ "decisions/0001-architecture.md", "decisions/0002-python-stack.md" ] },
   { "Исследования" = [ "research/lira-api.md" ] },
   "TASKS.md",
+  { "История" = [ "history/stage-1.md" ] },
 ]
 
 [project.theme]
