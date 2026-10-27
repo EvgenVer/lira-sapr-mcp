@@ -7,16 +7,26 @@ a dynamic one has several, which displacements address by mode number (e.g. 1, 5
 and forces by position (1, 2, 3) - checked on a live LIRA 2024 R2.
 """
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from lira_sapr_mcp.adapters.base import parse_numbers
+from lira_sapr_mcp.adapters.discovery import LiraInstall
+from lira_sapr_mcp.adapters.typelibs import (
+    RESULTS_ACCESS,
+    coclass_id,
+    registered_typelibs,
+    results_library,
+)
 from lira_sapr_mcp.errors import LiraComError, LiraInputError
+
+log = logging.getLogger(__name__)
 
 # What the library raises when the model has no results files (E_UNEXPECTED).
 NO_RESULTS_HRESULT = -2147418113
 
-# Type library and class of the results library, per LIRA release.
+# Results library of LIRA 2024 R2: used when a release's own is not registered.
 RES_TYPELIB = {2024: ("{BD6C09E6-B5EE-4DAB-8D61-C009BA755C46}", 1, 0)}
 RES_CLASS = {2024: "{4F4546AE-AC54-48A2-9414-1B9EF6519A37}"}
 
@@ -116,19 +126,35 @@ class ResultsReader:
     """A fresh results object per request: a second request through the same object
     returns garbage numbers (LIRA 2024, checked on a live install)."""
 
-    def __init__(self, year: int) -> None:
-        self.year = year
+    def __init__(self, install: LiraInstall) -> None:
+        self.install = install
         self._c: Any = None
+        self._library: tuple[str, int, int, str] | None = None
+
+    def _choose_library(self) -> tuple[str, int, int, str]:
+        """The release's own results library, else the one of LIRA 2024 R2."""
+        if self._library is None:
+            guid, major, minor = RES_TYPELIB[2024]
+            cls = RES_CLASS[2024]
+            try:
+                own = results_library(self.install, registered_typelibs())
+                if own is not None:
+                    guid, (major, minor) = own.guid, own.major_minor
+                    cls = coclass_id(own.path, RESULTS_ACCESS) or cls
+            except Exception as exc:  # registry or type library unreadable
+                log.warning("Results library of LIRA %s not found: %s", self.install.year, exc)
+            log.info("results library %s %d.%d, class %s", guid, major, minor, cls)
+            self._library = (guid, major, minor, cls)
+        return self._library
 
     def _access(self) -> Any:
         import win32com.client
         from win32com.client import gencache
 
-        lib = RES_TYPELIB.get(self.year, RES_TYPELIB[2024])
-        cls = RES_CLASS.get(self.year, RES_CLASS[2024])
+        guid, major, minor, cls = self._choose_library()
         try:
             if self._c is None:
-                gencache.EnsureModule(lib[0], 0, lib[1], lib[2])
+                gencache.EnsureModule(guid, 0, major, minor)
                 self._c = win32com.client.constants
             obj = win32com.client.Dispatch(cls)
         except Exception as exc:

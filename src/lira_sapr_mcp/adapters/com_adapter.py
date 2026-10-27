@@ -87,7 +87,7 @@ class ComLiraAdapter:
         self._dirty_by_reads: set[str] = set()
         self.analysis = AnalysisState()
         self._events: Any = None
-        self.results = ResultsReader(install.year)
+        self.results = ResultsReader(install)
 
     # --- connection -----------------------------------------------------------------
 

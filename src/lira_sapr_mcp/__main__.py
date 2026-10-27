@@ -18,8 +18,17 @@ def setup_logging(log_file) -> None:
 
 
 def main() -> None:
-    if "--version" in sys.argv[1:]:
+    args = sys.argv[1:]
+    if "--version" in args:
         print(f"lira-sapr-mcp {__version__}")
+        return
+    if "--diagnose" in args:
+        from pathlib import Path
+
+        from lira_sapr_mcp.diagnose import write_report
+
+        rest = args[args.index("--diagnose") + 1 :]
+        print(f"Report written to {write_report(Path(rest[0]) if rest else None)}")
         return
     from lira_sapr_mcp.config import Settings, load_settings
     from lira_sapr_mcp.errors import LiraInputError
