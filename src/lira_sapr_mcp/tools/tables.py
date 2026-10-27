@@ -1,40 +1,19 @@
 """Tools: LIRA input tables and loads."""
 
-import re
 from typing import Any
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
 
+from lira_sapr_mcp.adapters.base import parse_numbers
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services import loads as loads_service
 from lira_sapr_mcp.services.session import LiraSession
 from lira_sapr_mcp.services.textformat import Load
-from lira_sapr_mcp.tools.common import lira_errors, plain
+from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors, plain
 
-READ_ONLY = ToolAnnotations(readOnlyHint=True)
 Cell = str | int | float | None
-
-
-def parse_numbers(numbers: list[int] | str | None) -> list[int] | None:
-    """Accept [1, 2, 5] or LIRA-style "1-3 7 10-12"."""
-    if numbers is None or isinstance(numbers, list):
-        return numbers or None
-    out: list[int] = []
-    for part in re.split(r"[,\s]+", numbers.strip()):
-        if not part:
-            continue
-        m = re.fullmatch(r"(\d+)-(\d+)", part)
-        if m:
-            a, b = int(m.group(1)), int(m.group(2))
-            if b < a or b - a > 1_000_000:
-                raise LiraInputError(f"Bad range {part!r}")
-            out.extend(range(a, b + 1))
-        elif part.isdigit():
-            out.append(int(part))
-        else:
-            raise LiraInputError(f"Bad number list {numbers!r}: use e.g. '1-3 7 10-12'")
-    return out or None
+# LIRA writes the text export in the background; the adapter waits up to 120 s for it.
+EXPORT_TIMEOUT_S = 150.0
 
 
 def register(mcp: MCPServer, session: LiraSession) -> None:
@@ -113,7 +92,9 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         units of the text format, see the model's document 0 key 33).
         """
         ref = await session.resolve(model)
-        loads = await session.run(loads_service.read_loads, session.adapter, ref, load_cases)
+        loads = await session.run(
+            loads_service.read_loads, session.adapter, ref, load_cases, timeout=EXPORT_TIMEOUT_S
+        )
         return {"loads": loads, "count": len(loads)}
 
     @mcp.tool()
@@ -133,16 +114,21 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         check the model in LIRA after this call.
         """
         ref = await session.resolve(model)
-        parsed = [
-            Load(
-                int(d["case"]),
-                int(d["target"]),
-                int(d["type"]),
-                int(d["direction"]),
-                [float(v) for v in d.get("values", [])],
-            )
-            for d in loads
-        ]
+        try:
+            parsed = [
+                Load(
+                    int(d["case"]),
+                    int(d["target"]),
+                    int(d["type"]),
+                    int(d["direction"]),
+                    [float(v) for v in d.get("values", [])],
+                )
+                for d in loads
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LiraInputError(
+                f"Bad load {exc!s}: each load needs case, target, type, direction, values"
+            ) from exc
         backup = await backup_before_change(ref)
         result = await session.run(
             loads_service.set_loads,
@@ -164,13 +150,14 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         ( 5/ restraints ) ( 6/ loads ) ( 7/ load values ). The best way to learn it is to
         export a similar model with lira_export_text.
         """
+        backup = session.backups.ensure(save_as)
         info = await session.run(loads_service.import_text_model, session.adapter, text, save_as)
-        return {"model": plain(info)}
+        return {"model": plain(info), "backup": str(backup) if backup else None}
 
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors
     async def lira_export_text(model: str | None = None) -> dict[str, Any]:
         """The whole model in LIRA's text input format (documents 0-8 and more)."""
         ref = await session.resolve(model)
-        text = await session.run(session.adapter.export_text, ref)
+        text = await session.run(session.adapter.export_text, ref, timeout=EXPORT_TIMEOUT_S)
         return {"text": text}

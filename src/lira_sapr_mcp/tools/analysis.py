@@ -5,13 +5,11 @@ import time
 from typing import Any
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
 
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools.common import lira_errors
+from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors
 
-READ_ONLY = ToolAnnotations(readOnlyHint=True)
 POLL_S = 0.5
 
 
@@ -39,6 +37,8 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         LIRA closes the model after the analysis: reopen it to continue editing.
         """
         ref = await session.resolve(model)
+        # LIRA analyses the file; a model we only read may be saved first (see adapter).
+        session.backups.ensure(ref)
         status = await session.run(session.adapter.start_analysis, ref)
         session.analysed[ref.lower()] = ref
         if not wait:

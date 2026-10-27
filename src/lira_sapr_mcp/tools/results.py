@@ -4,14 +4,11 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
 
+from lira_sapr_mcp.adapters.base import norm_path, parse_numbers
 from lira_sapr_mcp.services import results as rs
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools.common import lira_errors
-from lira_sapr_mcp.tools.tables import parse_numbers
-
-READ_ONLY = ToolAnnotations(readOnlyHint=True)
+from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors
 
 
 def register(mcp: MCPServer, session: LiraSession) -> None:
@@ -29,7 +26,9 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
     def name_warning(path: str) -> str | None:
         stem = Path(path).stem.lower()
         others = [
-            p for k, p in session.analysed.items() if Path(k).stem == stem and k != path.lower()
+            p
+            for k, p in session.analysed.items()
+            if Path(k).stem == stem and norm_path(k) != norm_path(path)
         ]
         if others:
             return (

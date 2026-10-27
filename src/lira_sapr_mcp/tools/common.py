@@ -5,8 +5,11 @@ from collections.abc import Awaitable, Callable
 from typing import Any, ParamSpec, TypeVar
 
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from lira_sapr_mcp.errors import LiraError
+
+READ_ONLY = ToolAnnotations(readOnlyHint=True)
 
 P = ParamSpec("P")
 R = TypeVar("R")

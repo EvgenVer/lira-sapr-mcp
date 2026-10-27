@@ -49,7 +49,12 @@ def import_text_model(adapter: Any, text: str, save_as: str) -> Any:
         raise LiraInputError("save_as must be a .lir path")
     TextModel.parse(text)  # fail early on text that is not a LIRA text model
     info = _import_text(adapter, text, target.stem)
-    return adapter.save_document(info.path or info.title, str(target))
+    ref = info.path or info.title
+    try:
+        return adapter.save_document(ref, str(target))
+    except BaseException:
+        adapter.close_document(ref, discard=True)
+        raise
 
 
 def _snapshot(adapter: Any, ref: str) -> dict[str, list | None]:
@@ -115,9 +120,12 @@ def set_loads(adapter: Any, ref: str, loads: list[Load], cases: list[int] | None
                 f"loads match: {_same_loads(got, wanted)}). The original model is untouched."
             )
     except BaseException:
-        adapter.close_document(new_ref)
+        try:
+            adapter.close_document(new_ref, discard=True)
+        except LiraError:
+            log.warning("could not close the rebuilt model %s", new_ref, exc_info=True)
         raise
-    adapter.close_document(orig.path)
+    adapter.close_document(orig.path, discard=True)
     adapter.save_document(new_ref, orig.path)
     log.info("loads of %s replaced; tables restored: %s", orig.path, restored)
     return {

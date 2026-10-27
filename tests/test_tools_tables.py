@@ -2,9 +2,9 @@ import pytest
 from mcp import Client
 
 from fakes import fake_session
+from lira_sapr_mcp.adapters.base import parse_numbers
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.server import build_server
-from lira_sapr_mcp.tools.tables import parse_numbers
 
 
 def test_number_lists_accept_lira_ranges():

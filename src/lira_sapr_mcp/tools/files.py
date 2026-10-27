@@ -4,15 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
 
 from lira_sapr_mcp.adapters.base import MODEL_TYPES
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services.models import model_summary
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools.common import lira_errors, plain
-
-READ_ONLY = ToolAnnotations(readOnlyHint=True)
+from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors, plain
 
 
 def register(mcp: MCPServer, session: LiraSession) -> None:
@@ -54,11 +51,12 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         """
         if model_type not in MODEL_TYPES and model_type not in (6, 15):
             raise LiraInputError(f"Unknown model_type {model_type}")
+        backup = session.backups.ensure(save_as) if save_as else None
         info = await session.run(session.adapter.create_document, title, model_type, description)
         if save_as:
             ref = info.path or info.title
             info = await session.run(session.adapter.save_document, ref, save_as)
-        return {"model": plain(info)}
+        return {"model": plain(info), "backup": str(backup) if backup else None}
 
     @mcp.tool()
     @lira_errors
@@ -84,6 +82,8 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         """Close a model (default: the active one).
 
         Refuses to close a model with unsaved changes unless discard_changes is true.
+        A model the server has only read is saved before closing (after a backup) in
+        case it was edited in LIRA's window meanwhile.
         """
         ref = await session.resolve(model)
         info = await session.run(session.adapter.document_info, ref)
@@ -91,7 +91,9 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
             raise LiraInputError(
                 f"{info.title} has unsaved changes: save it first or pass discard_changes=true"
             )
-        await session.run(session.adapter.close_document, ref)
+        if info.saved and not discard_changes:
+            session.backups.ensure(info.path)
+        await session.run(session.adapter.close_document, ref, discard_changes)
         return {"closed": plain(info)}
 
     @mcp.tool(annotations=READ_ONLY)

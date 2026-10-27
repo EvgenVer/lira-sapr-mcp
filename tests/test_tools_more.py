@@ -1,0 +1,91 @@
+"""Tools the first tests did not reach: analysis, loads and text, with the fake adapter."""
+
+from pathlib import Path
+
+import pytest
+from mcp import Client
+
+from fakes import fake_session
+from lira_sapr_mcp.server import build_server
+
+pytestmark = pytest.mark.anyio
+
+FRAME = (
+    "( 0/ 1; F/ 2; 5/ )\n( 1/ 10 1 1 2/ )\n( 4/ 0 0 0/ 0 0 3/ )\n( 6/ 1 6 3 1 1/ )\n( 7/ 1 5/ )\n"
+)
+
+
+async def call(client, name, args=None):
+    return await client.call_tool(name, args or {})
+
+
+async def test_analysis_tools_run_report_and_stop(tmp_path):
+    session, _ = fake_session(tmp_path)
+    model = tmp_path / "frame.lir"
+    model.write_bytes(b"lir")
+    async with Client(build_server(session)) as client:
+        await call(client, "lira_open_model", {"path": str(model)})
+        res = await call(client, "lira_run_analysis", {})
+        assert res.structured_content["status"] == "finished"
+        assert session.analysed == {str(model).lower(): str(model)}
+        backups = list((tmp_path / "lira-mcp-backups").glob("frame_*.lir"))
+        assert len(backups) == 1
+        status = await call(client, "lira_analysis_status", {})
+        assert status.structured_content["model"] == str(model)
+        protocol = await call(client, "lira_analysis_protocol", {})
+        assert "успешно" in protocol.structured_content["text"]
+        stopped = await call(client, "lira_stop_analysis", {})
+        assert stopped.structured_content["status"] == "stopped"
+
+
+async def test_analysis_refuses_unsaved_changes(tmp_path):
+    session, _ = fake_session(tmp_path)
+    async with Client(build_server(session)) as client:
+        await call(client, "lira_create_model", {"title": "new"})
+        res = await call(client, "lira_run_analysis", {})
+    assert res.is_error and "save first" in res.content[0].text
+
+
+async def test_import_text_backs_up_an_existing_target(tmp_path):
+    session, _ = fake_session(tmp_path)
+    target = tmp_path / "owner.lir"
+    target.write_bytes(b"owner's model")
+    async with Client(build_server(session)) as client:
+        res = await call(client, "lira_import_text_model", {"text": FRAME, "save_as": str(target)})
+        assert not res.is_error, res.content
+        backup = res.structured_content["backup"]
+        assert backup and Path(backup).read_bytes() == b"owner's model"
+        loads = await call(client, "lira_read_loads", {})
+        (load,) = loads.structured_content["loads"]
+        assert (load["case"], load["target"], load["type"], load["direction"]) == (1, 1, 6, 3)
+        assert load["values"] == [5.0]
+        text = await call(client, "lira_export_text", {})
+        assert "( 4/" in text.structured_content["text"]
+
+
+async def test_create_with_save_as_backs_up_an_existing_file(tmp_path):
+    session, _ = fake_session(tmp_path)
+    target = tmp_path / "old.lir"
+    target.write_bytes(b"old")
+    async with Client(build_server(session)) as client:
+        res = await call(client, "lira_create_model", {"title": "x", "save_as": str(target)})
+    assert res.structured_content["backup"]
+
+
+async def test_bad_loads_are_a_clear_error(tmp_path):
+    session, _ = fake_session(tmp_path)
+    model = tmp_path / "m.lir"
+    model.write_bytes(b"x")
+    async with Client(build_server(session)) as client:
+        await call(client, "lira_open_model", {"path": str(model)})
+        res = await call(client, "lira_set_loads", {"loads": [{"case": 1, "target": 2}]})
+    assert res.is_error and "each load needs" in res.content[0].text
+
+
+async def test_list_tools_answer_without_a_model(tmp_path):
+    session, _ = fake_session(tmp_path)
+    async with Client(build_server(session)) as client:
+        models = await call(client, "lira_list_models", {})
+        tables = await call(client, "lira_list_input_tables", {})
+    assert not models.is_error and not tables.is_error
+    assert "Nodes_Coordinates" in tables.structured_content["result"]

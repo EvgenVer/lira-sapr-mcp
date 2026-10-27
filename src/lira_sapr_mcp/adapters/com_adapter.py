@@ -6,7 +6,6 @@ tables of newer releases show up without code changes.
 """
 
 import logging
-import os
 import time
 import uuid
 from collections.abc import Iterator
@@ -26,6 +25,8 @@ from lira_sapr_mcp.adapters.base import (
     DocInfo,
     TableError,
     Units,
+    decode_lira_text,
+    norm_path,
     normalize_rows,
     parse_table_errors,
 )
@@ -64,10 +65,6 @@ def com_message(exc: BaseException) -> str:
     if len(args) >= 2 and args[1]:
         return str(args[1]).strip()
     return repr(exc)
-
-
-def norm_path(path: str) -> str:
-    return os.path.normcase(os.path.abspath(path)) if path else ""
 
 
 class ComLiraAdapter:
@@ -157,6 +154,19 @@ class ComLiraAdapter:
     def _modified(self, doc: Any) -> bool:
         return bool(doc.IsModified()) and self._key(doc) not in self._dirty_by_reads
 
+    def _maybe_edited(self, doc: Any) -> bool:
+        """LIRA says modified, but we counted that as our own reads: the owner may also
+        have edited the model in LIRA's window since, and we cannot tell the two apart."""
+        return bool(doc.IsModified()) and self._key(doc) in self._dirty_by_reads
+
+    def _save_possible_edits(self, doc: Any) -> None:
+        """Save a model whose only known changes are our reads, so that edits the owner
+        may have made in LIRA meanwhile are neither lost nor left out of an analysis."""
+        if self._maybe_edited(doc) and str(doc.PathName).lower().endswith(".lir"):
+            log.info("saving %s before closing or analysing it", doc.PathName)
+            self._changed(doc)
+            self._call("Save", doc.Save, False)
+
     @contextmanager
     def _reading(self, doc: Any) -> Iterator[None]:
         """Wrap a read that LIRA may count as a change of ``doc``."""
@@ -224,7 +234,7 @@ class ComLiraAdapter:
             raise LiraInputError(f"File not found: {path}")
         for d in self._docs():
             if norm_path(str(d.PathName)) == norm_path(str(p)):
-                d.Activate()
+                self._call("Activate", d.Activate)
                 return self._info(d), "already open"
         res = self._call("OpenDocument", self._app.OpenDocument, str(p.resolve()), False, True)
         doc, msgs = (res if isinstance(res, tuple) else (res, ""))[:2]
@@ -258,7 +268,7 @@ class ComLiraAdapter:
 
     def save_document(self, ref: str, path: str | None = None) -> DocInfo:
         doc = self.find_document(ref)
-        doc.Activate()
+        self._call("Activate", doc.Activate)
         if path:
             target = Path(path)
             if target.suffix.lower() != ".lir":
@@ -273,8 +283,13 @@ class ComLiraAdapter:
             self._call("Save", doc.Save, False)
         return self._info(doc)
 
-    def close_document(self, ref: str) -> None:
+    def close_document(self, ref: str, discard: bool = False) -> None:
+        """Close a document. LIRA's Close drops unsaved changes, so unless ``discard``
+        a saved model that may hold the owner's edits is saved first; callers refuse to
+        close models with changes of their own."""
         doc = self.find_document(ref)
+        if not discard:
+            self._save_possible_edits(doc)
         self._changed(doc)
         self._call("Close", doc.Close)
 
@@ -393,12 +408,10 @@ class ComLiraAdapter:
             target.unlink(missing_ok=True)
             if parked is not None:
                 parked.rename(target)
-        for encoding in ("utf-8-sig", "cp1251"):
-            try:
-                return raw.decode(encoding)
-            except UnicodeDecodeError:
-                continue
-        raise LiraComError(f"Cannot decode LIRA's text export {target}")
+        text = decode_lira_text(raw)
+        if text is None:
+            raise LiraComError(f"Cannot decode LIRA's text export {target}")
+        return text
 
     # --- analysis -------------------------------------------------------------------
 
@@ -413,8 +426,13 @@ class ComLiraAdapter:
             )
         if self.analysis.status in ("running", "needs_user"):
             raise LiraInputError(f"An analysis of {self.analysis.model} is still running")
+        self._save_possible_edits(self.find_document(info.path))
         self.analysis.start(info.path)
-        ok = self._call("StartAnalysis", self._app.StartAnalysis, info.path)
+        try:
+            ok = self._call("StartAnalysis", self._app.StartAnalysis, info.path)
+        except BaseException:
+            self.analysis.on_finished(1)
+            raise
         if not ok:
             self.analysis.on_finished(1)
             work = self.directories().get("WorkDirectory", "")

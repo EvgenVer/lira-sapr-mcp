@@ -42,7 +42,7 @@ def lira(worker, adapter):
     yield run
     for doc in run(adapter.list_documents):
         if doc.path.lower() not in before:
-            run(adapter.close_document, doc.path or doc.title)
+            run(adapter.close_document, doc.path or doc.title, True)
 
 
 @pytest.fixture

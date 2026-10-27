@@ -8,7 +8,11 @@ radians, ton-force and ton-force * meter. Indices: load cases and design section
 from pathlib import Path
 from typing import Any
 
+from lira_sapr_mcp.adapters.base import parse_numbers
 from lira_sapr_mcp.errors import LiraComError, LiraInputError
+
+# What the library raises when the model has no results files (E_UNEXPECTED).
+NO_RESULTS_HRESULT = -2147418113
 
 # Type library and class of the results library, per LIRA release.
 RES_TYPELIB = {2024: ("{BD6C09E6-B5EE-4DAB-8D61-C009BA755C46}", 1, 0)}
@@ -55,9 +59,13 @@ class ResultsReader:
         try:
             return getattr(access, method)(req)
         except Exception as exc:
-            raise LiraInputError(
-                f"No analysis results for {Path(model_path).stem!r}: run lira_run_analysis "
-                "for this model first"
+            if _scode(exc) == NO_RESULTS_HRESULT:
+                raise LiraInputError(
+                    f"No analysis results for {Path(model_path).stem!r}: run "
+                    "lira_run_analysis for this model first"
+                ) from exc
+            raise LiraComError(
+                f"Reading results of {Path(model_path).stem!r} failed: {exc}"
             ) from exc
 
     def node_displacements(
@@ -122,15 +130,16 @@ class ResultsReader:
         return rows
 
 
+def _scode(exc: Exception) -> int | None:
+    """The error code of a COM exception: inside its exception info when it has one."""
+    info = getattr(exc, "excepinfo", None)
+    if info and len(info) > 5 and info[5]:
+        return int(info[5])
+    return getattr(exc, "hresult", None)
+
+
 def _numbers(text: str) -> list[int]:
-    out: list[int] = []
-    for part in str(text or "").replace(",", " ").split():
-        if "-" in part:
-            a, b = part.split("-", 1)
-            out.extend(range(int(a), int(b) + 1))
-        else:
-            out.append(int(part))
-    return out
+    return parse_numbers(str(text or "")) or []
 
 
 def _cases(infos: Any, wanted: list[int] | None) -> list[int]:

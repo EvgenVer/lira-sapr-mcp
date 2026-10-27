@@ -20,6 +20,8 @@ class FakeAdapter:
         self.table_kinds = {"Nodes_Coordinates": 2, "Elements_TypeAndNodes": 3, "LoadCases": 25}
         self.docs: dict[str, dict] = {}
         self.active: str | None = None
+        self.analysis = "idle"
+        self.analysed: str | None = None
 
     def connect(self) -> None:
         self.connected = True
@@ -78,7 +80,7 @@ class FakeAdapter:
         d["modified"] = False
         return self._info(d)
 
-    def close_document(self, ref):
+    def close_document(self, ref, discard=False):
         d = self._get(ref)
         self.docs.pop(d["path"])
         if self.active == d["path"]:
@@ -96,7 +98,29 @@ class FakeAdapter:
         return []
 
     def analysis_status(self):
-        return {"status": "idle", "model": None}
+        return {"status": self.analysis, "model": self.analysed}
+
+    def start_analysis(self, ref):
+        d = self._get(ref)
+        if d["modified"]:
+            raise LiraInputError(f"{d['title']} has unsaved changes; save first")
+        self.analysis, self.analysed = "finished", d["path"]
+        return {"status": "running", "model": d["path"]}
+
+    def stop_analysis(self):
+        self.analysis = "stopped"
+
+    def protocol(self, model_path):
+        return "Расчет успешно завершен\n" if model_path == self.analysed else None
+
+    def export_text(self, ref):
+        return self._get(ref)["text"]
+
+    def import_file(self, path, template=""):
+        text = Path(path).read_text(encoding="utf-8-sig")
+        info = self.create_document(Path(path).stem, 5)
+        self._get(info.path)["text"] = text
+        return info
 
     # Beam 1 with 3 sections in t*m; node 2 moving down 1.25 mm, in m.
     def bar_forces(self, model_path, elements, cases):

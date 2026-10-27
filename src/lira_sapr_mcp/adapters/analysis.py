@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from lira_sapr_mcp.adapters.base import decode_lira_text
+
 STAGES = {
     0: "finite element analysis",
     1: "design combinations of forces (DCF)",
@@ -95,12 +97,8 @@ def read_protocol(path: Path) -> str | None:
     if not path.exists():
         return None
     raw = path.read_bytes()
-    for encoding in ("utf-8-sig", "cp1251"):
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("utf-8", errors="replace")
+    text = decode_lira_text(raw)
+    return text if text is not None else raw.decode("utf-8", errors="replace")
 
 
 def summarize_protocol(text: str) -> dict:

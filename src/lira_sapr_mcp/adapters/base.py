@@ -1,6 +1,10 @@
 """Version-independent data shapes the adapters return."""
 
+import os
+import re
 from dataclasses import dataclass, field
+
+from lira_sapr_mcp.errors import LiraInputError
 
 # LIRA "system label" (признак схемы): which degrees of freedom each node has.
 MODEL_TYPES = {
@@ -67,6 +71,42 @@ def parse_table_errors(text: str) -> list[TableError]:
         except (ValueError, IndexError):
             errors.append(TableError(-1, -1, line.strip()))
     return errors
+
+
+def norm_path(path: str) -> str:
+    """Comparable form of a file path (absolute, case-folded on Windows)."""
+    return os.path.normcase(os.path.abspath(path)) if path else ""
+
+
+def parse_numbers(numbers: list[int] | str | None) -> list[int] | None:
+    """Accept [1, 2, 5] or LIRA-style "1-3 7 10-12" (commas allowed); None when empty."""
+    if numbers is None or isinstance(numbers, list):
+        return numbers or None
+    out: list[int] = []
+    for part in re.split(r"[,\s]+", str(numbers).strip()):
+        if not part:
+            continue
+        m = re.fullmatch(r"(\d+)-(\d+)", part)
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            if b < a or b - a > 1_000_000:
+                raise LiraInputError(f"Bad range {part!r}")
+            out.extend(range(a, b + 1))
+        elif part.isdigit():
+            out.append(int(part))
+        else:
+            raise LiraInputError(f"Bad number list {numbers!r}: use e.g. '1-3 7 10-12'")
+    return out or None
+
+
+def decode_lira_text(raw: bytes) -> str | None:
+    """LIRA writes text files in UTF-8 (with BOM) or, in older paths, in cp1251."""
+    for encoding in ("utf-8-sig", "cp1251"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return None
 
 
 def normalize_rows(data: object) -> list[list[object]]:

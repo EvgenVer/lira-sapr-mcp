@@ -93,3 +93,13 @@ async def test_missing_results_say_what_to_do(tmp_path):
     async with Client(build_server(session)) as client:
         res = await client.call_tool("lira_bar_forces", {"model": str(tmp_path / "x.lir")})
     assert res.is_error and "No analysis results" in res.content[0].text
+
+
+def test_no_results_code_is_read_from_com_exception_info():
+    from lira_sapr_mcp.adapters.results import NO_RESULTS_HRESULT, _scode
+
+    class ComError(Exception):
+        hresult = -2147352567
+        excepinfo = (0, None, None, None, 0, NO_RESULTS_HRESULT)
+
+    assert _scode(ComError()) == NO_RESULTS_HRESULT
