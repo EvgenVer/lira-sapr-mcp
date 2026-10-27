@@ -6,9 +6,10 @@ tables of newer releases show up without code changes.
 """
 
 import logging
+import os
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -497,7 +498,7 @@ class ComLiraAdapter:
         target = Path(folder) / f"{doc.Title}.txt"
         parked = None
         if target.exists():
-            parked = target.with_name(f"{target.name}.{TEMP_TABLE_MARK}{uuid.uuid4().hex[:8]}")
+            parked = target.with_name(f"{target.name}.{_parked_suffix()}")
             target.rename(parked)
         try:
             cmd = EXPORT_TEXT_CMD.get(self.install.year, EXPORT_TEXT_CMD[2024])
@@ -688,13 +689,39 @@ class ComLiraAdapter:
         )
 
 
-def return_parked_files(folder: Path) -> list[Path]:
+def _parked_suffix() -> str:
+    """Suffix of a set-aside file: names this process, so that another server process
+    sharing LIRA's text folder leaves the file alone while this one is alive."""
+    return f"{TEMP_TABLE_MARK}{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def _process_alive(pid: int) -> bool:
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        ok = kernel32.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code))
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+
+
+def return_parked_files(folder: Path, alive: Callable[[int], bool] = _process_alive) -> list[Path]:
     """Put back the user's text files that a text export set aside and a crash left
-    renamed (``<name>.txt.lira-mcp-<id>``). A file whose name is taken again is left as
-    it is and logged."""
+    renamed (``<name>.txt.lira-mcp-<pid>-<id>``). Files of a server process still
+    running are its own business; a file whose name is taken again is left and logged."""
     returned = []
     for parked in folder.glob(f"*.{TEMP_TABLE_MARK}*"):
-        original = parked.with_name(parked.name.split(f".{TEMP_TABLE_MARK}")[0])
+        original_name, _, tag = parked.name.partition(f".{TEMP_TABLE_MARK}")
+        owner = tag.split("-")[0]
+        if "-" in tag and owner.isdigit() and alive(int(owner)):
+            continue
+        original = parked.with_name(original_name)
         if original.exists():
             log.warning("Parked file %s not returned: %s exists again", parked, original.name)
             continue

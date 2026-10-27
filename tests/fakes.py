@@ -17,7 +17,9 @@ class FakeAdapter:
     def __init__(self, install: LiraInstall = INSTALL) -> None:
         self.install = install
         self.connected = False
-        self.capabilities = frozenset({"OpenDocument", "ImportFile", "StartAnalysis"})
+        self.capabilities = frozenset({"OpenDocument", "CreateNewDocument", "ImportFile",
+                                       "StartAnalysis", "StopAnalysis", "DeleteResults",
+                                       "StartCmd", "SetDeadWeightLoad", "Select"})  # fmt: skip
         self.table_kinds = {"Nodes_Coordinates": 2, "Elements_TypeAndNodes": 3, "LoadCases": 25,
                             "Nodes_Restraints": 4, "Stiffnesses": 9, "Elements_Stiffnesses": 10,
                             "Stiffnesses_Factors": 28}  # fmt: skip

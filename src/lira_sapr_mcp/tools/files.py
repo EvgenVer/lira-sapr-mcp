@@ -1,5 +1,6 @@
 """Tools: LIRA status, opening, creating, saving and closing models, backups, summary."""
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ from lira_sapr_mcp.adapters.base import MODEL_TYPES, norm_path
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services.models import model_summary
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors, plain
+from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors, needs, plain
 
 
 def register(mcp: MCPServer, session: LiraSession) -> None:
@@ -33,6 +34,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool()
     @lira_errors
+    @needs(session, "OpenDocument")
     async def lira_open_model(path: str) -> dict[str, Any]:
         """Open a .lir model file in LIRA (starts LIRA if needed) and make it active."""
         info, messages = await session.run(session.adapter.open_document, path)
@@ -40,6 +42,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool()
     @lira_errors
+    @needs(session, "CreateNewDocument")
     async def lira_create_model(
         title: str, model_type: int = 5, description: str = "", save_as: str | None = None
     ) -> dict[str, Any]:
@@ -119,6 +122,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
     @lira_errors
+    @needs(session, "OpenDocument")
     async def lira_restore_backup(
         model: str | None = None, backup: str | None = None, discard_changes: bool = False
     ) -> dict[str, Any]:
@@ -129,19 +133,23 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         folder still belong to the replaced version: analyse again.
         """
         path = await file_of(model)
+        chosen = session.backups.choose(path, backup)  # before anything is closed
         docs = await session.run(session.adapter.list_documents)
         doc = next((d for d in docs if d.path and norm_path(d.path) == norm_path(path)), None)
-        if doc is not None:
-            if doc.modified and not discard_changes:
-                raise LiraInputError(
-                    f"{doc.title} has unsaved changes: save them first (they are then backed "
-                    "up as well) or pass discard_changes=true"
-                )
-            await session.run(session.adapter.close_document, doc.path, True)
-        restored = session.backups.restore(path, backup)
-        if doc is not None:
+        if doc is None:
+            restored = await asyncio.to_thread(session.backups.restore, path, chosen)
+            return {"model": path, "reopened": False, **restored}
+        if doc.modified and not discard_changes:
+            raise LiraInputError(
+                f"{doc.title} has unsaved changes: save them first (they are then backed "
+                "up as well) or pass discard_changes=true"
+            )
+        await session.run(session.adapter.close_document, doc.path, True)
+        try:
+            restored = await asyncio.to_thread(session.backups.restore, path, chosen)
+        finally:  # reopened even if the copy failed, so the model does not vanish
             await session.run(session.adapter.open_document, path)
-        return {"model": path, "reopened": doc is not None, **restored}
+        return {"model": path, "reopened": True, **restored}
 
     # Image content, not structured output: the answer is the picture itself.
     @mcp.tool(
@@ -149,6 +157,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         structured_output=False,
     )
     @lira_errors
+    @needs(session, "StartCmd")
     async def lira_model_picture(
         model: str | None = None, view: str = "isometric", save_path: str | None = None
     ) -> list[Any]:

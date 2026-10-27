@@ -113,3 +113,16 @@ def test_parked_text_files_go_back_unless_the_name_is_taken(tmp_path):
     assert returned == [tmp_path / "frame.txt"]
     assert (tmp_path / "frame.txt").read_text() == "owner's text"
     assert (tmp_path / "slab.txt.lira-mcp-5e6f7a8b").exists()
+
+
+def test_files_parked_by_a_running_server_process_are_left_to_it(tmp_path):
+    import os
+
+    from lira_sapr_mcp.adapters.com_adapter import _process_alive, return_parked_files
+
+    (tmp_path / "live.txt.lira-mcp-111-1a2b3c4d").write_text("being exported")
+    (tmp_path / "dead.txt.lira-mcp-222-5e6f7a8b").write_text("crash left it")
+    returned = return_parked_files(tmp_path, alive=lambda pid: pid == 111)
+    assert returned == [tmp_path / "dead.txt"]
+    assert (tmp_path / "live.txt.lira-mcp-111-1a2b3c4d").exists()
+    assert _process_alive(os.getpid()) and not _process_alive(4_000_000_000 // 4 * 4)

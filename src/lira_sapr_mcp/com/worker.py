@@ -73,7 +73,10 @@ class ComWorker:
         self._busy_with: str | None = None
         self._started_at = 0.0
         # A job still running after its caller gave up, and how the last such job ended.
+        # The lock orders the caller giving up against the worker finishing the job.
+        self._lock = threading.Lock()
         self._overdue: Future | None = None
+        self._overdue_job: str | None = None
         self.last_overdue: dict[str, Any] | None = None
 
     @property
@@ -84,7 +87,7 @@ class ComWorker:
     @property
     def overdue(self) -> str | None:
         """Name of a job that ran past its time-out and is still running, if any."""
-        return self._busy_with if self._overdue is not None else None
+        return self._overdue_job if self._overdue is not None else None
 
     def start(self) -> None:
         if self._thread is None:
@@ -121,6 +124,11 @@ class ComWorker:
             return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(fut)), timeout)
         except TimeoutError:
             raise self._timed_out(fut, fn, timeout) from None
+        except asyncio.CancelledError:
+            # The client gave up (Esc, disconnect): a queued job must not run unseen later.
+            if not fut.cancel():
+                self._mark_overdue(fut, getattr(fn, "__name__", repr(fn)))
+            raise
 
     def _refuse_while_overdue(self, fn: Callable[..., Any]) -> None:
         """Answer at once while a timed-out job still holds LIRA: queued calls would only
@@ -134,13 +142,13 @@ class ComWorker:
             )
 
     def _timed_out(self, fut: Future, fn: Callable[..., Any], timeout: float) -> LiraTimeoutError:
-        name = getattr(fn, "__name__", fn)
+        name = getattr(fn, "__name__", repr(fn))
         if fut.cancel():  # still queued behind another job: it never runs
             return LiraTimeoutError(
                 f"LIRA did not start {name} within {timeout:.0f} s: it is busy with "
                 f"{self._busy_with or 'another call'}. The call was not run."
             )
-        self._overdue = fut
+        self._mark_overdue(fut, name)
         return LiraTimeoutError(
             f"LIRA did not finish {name} within {timeout:.0f} s. It is still running and may "
             "still complete and change the model: lira_status shows when it ends and whether "
@@ -148,15 +156,25 @@ class ComWorker:
             "for the user."
         )
 
-    def _record_overdue(self, error: BaseException | None) -> None:
+    def _mark_overdue(self, fut: Future, name: str) -> None:
+        """Remember a job its caller stopped waiting for; if it has just finished,
+        record how it ended at once."""
+        with self._lock:
+            if fut.done():
+                error = None if fut.cancelled() else fut.exception()
+                self._record_overdue(name, error)
+            else:
+                self._overdue, self._overdue_job = fut, name
+
+    def _record_overdue(self, name: str | None, error: BaseException | None) -> None:
         self.last_overdue = {
-            "job": self._busy_with,
+            "job": name,
             "seconds": round(time.monotonic() - self._started_at, 1),
             "ok": error is None,
             "error": None if error is None else str(error),
         }
-        log.warning("Job %s finished after its time-out: %s", self._busy_with, self.last_overdue)
-        self._overdue = None
+        log.warning("Job %s finished after its time-out: %s", name, self.last_overdue)
+        self._overdue = self._overdue_job = None
 
     def _loop(self) -> None:
         self._init()
@@ -185,8 +203,9 @@ class ComWorker:
                     fut.set_exception(exc)
                 # --8<-- [end:run_job]
                 finally:
-                    if self._overdue is fut:
-                        self._record_overdue(error)
+                    with self._lock:
+                        if self._overdue is fut:
+                            self._record_overdue(self._overdue_job, error)
                     self._busy_with = None
                 self._pump()
         finally:

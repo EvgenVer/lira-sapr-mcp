@@ -36,11 +36,11 @@ async def test_restore_puts_a_backup_back_and_can_be_undone(tmp_path):
     backups = Backups("lira-mcp-backups")
     original = backups.snapshot(path)
     path.write_bytes(b"broken by the agent")
-    done = backups.restore(str(path), str(original))
+    done = backups.restore(str(path), backups.choose(str(path), str(original)))
     assert path.read_bytes() == b"v1"
     assert done["restored_from"] == str(original)
     # The newest backup is now the broken version: restoring it undoes the restore.
-    backups.restore(str(path))
+    backups.restore(str(path), backups.choose(str(path)))
     assert path.read_bytes() == b"broken by the agent"
 
 
@@ -48,11 +48,11 @@ async def test_restore_takes_only_backups_of_this_model(tmp_path):
     path = model(tmp_path)
     backups = Backups("lira-mcp-backups")
     with pytest.raises(LiraInputError, match="No backups"):
-        backups.restore(str(path))
+        backups.choose(str(path))
     stranger = tmp_path / "other.lir"
     stranger.write_bytes(b"x")
     with pytest.raises(LiraInputError, match="is not a backup"):
-        backups.restore(str(path), str(stranger))
+        backups.choose(str(path), str(stranger))
 
 
 async def test_restore_tool_closes_and_reopens_an_open_model(tmp_path):
@@ -73,3 +73,21 @@ async def test_restore_tool_closes_and_reopens_an_open_model(tmp_path):
     assert done.structured_content["reopened"] is True
     assert path.read_bytes() == b"v1"
     assert str(path) in adapter.docs  # open again
+
+
+async def test_a_wrong_backup_leaves_an_open_model_open_and_unchanged(tmp_path):
+    session, adapter = fake_session(tmp_path)
+    path = model(tmp_path)
+    stranger = tmp_path / "other.lir"
+    stranger.write_bytes(b"x")
+    async with Client(build_server(session)) as client:
+        await client.call_tool("lira_open_model", {"path": str(path)})
+        await client.call_tool(
+            "lira_write_table", {"table": "Nodes_Coordinates", "rows": [[1, 0, 0, 0]]}
+        )
+        refused = await client.call_tool(
+            "lira_restore_backup", {"backup": str(stranger), "discard_changes": True}
+        )
+    assert refused.is_error and "is not a backup" in refused.content[0].text
+    assert str(path) in adapter.docs and adapter.docs[str(path)]["modified"]
+    assert path.read_bytes() == b"v1"

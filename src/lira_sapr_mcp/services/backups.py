@@ -68,20 +68,23 @@ class Backups:
                                                "bytes": f.stat().st_size}))  # fmt: skip
         return [b for _, b in sorted(found, key=lambda x: x[0], reverse=True)]
 
-    def restore(self, model_path: str, backup: str | None = None) -> dict[str, str]:
-        """Copy a backup (default: the newest) over the model file, after a backup of the
-        file as it is now, so that the restore itself can be undone. The model must not be
-        open in LIRA."""
+    def choose(self, model_path: str, backup: str | None = None) -> Path:
+        """The backup to restore: ``backup`` if it is one of the model's, else the newest."""
         target = Path(model_path)
         backups = self.of(model_path)
         if backup is None:
             if not backups:
                 raise LiraInputError(f"No backups of {target} in {target.parent / self.dir_name}")
-            chosen = Path(backups[0]["path"])
-        else:
-            chosen = Path(backup)
-            if str(chosen).lower() not in {b["path"].lower() for b in backups}:
-                raise LiraInputError(f"{backup} is not a backup of {target}: see lira_list_backups")
+            return Path(backups[0]["path"])
+        if str(Path(backup)).lower() not in {b["path"].lower() for b in backups}:
+            raise LiraInputError(f"{backup} is not a backup of {target}: see lira_list_backups")
+        return Path(backup)
+
+    def restore(self, model_path: str, chosen: Path) -> dict[str, str]:
+        """Copy a backup (from ``choose``) over the model file, after a backup of the file
+        as it is now, so that the restore itself can be undone. The model must not be
+        open in LIRA."""
+        target = Path(model_path)
         before = self.snapshot(target) if target.is_file() else None
         try:
             shutil.copy2(chosen, target)

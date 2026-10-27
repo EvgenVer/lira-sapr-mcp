@@ -32,6 +32,7 @@ def test_unknown_keys_are_rejected(tmp_path):
         ("lira_version = 2021", "must be a year such as 2024"),
         ("lira_version = true", "must be a year"),
         ('backup_dir_name = "a/b"', "must be a folder name"),
+        ('backup_dir_name = ".."', "must be a folder name"),
         ("call_timeout_s = ", "Cannot read settings file"),
     ],
 )

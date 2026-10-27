@@ -133,3 +133,61 @@ def test_an_overdue_job_that_fails_reports_its_error(worker):
             break
         time.sleep(0.02)
     assert worker.last_overdue["ok"] is False and "disk full" in worker.last_overdue["error"]
+
+
+def test_a_cancelled_call_still_queued_is_never_run(worker):
+    release = threading.Event()
+    ran = []
+    worker.submit(lambda: release.wait(5))
+    time.sleep(0.05)
+
+    async def main():
+        task = asyncio.create_task(worker.run(lambda: ran.append(1), timeout=5))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(main())
+    release.set()
+    worker.call(lambda: None, timeout=5)
+    assert ran == [] and worker.overdue is None
+
+
+def test_a_cancelled_call_already_running_counts_as_overdue(worker):
+    release = threading.Event()
+
+    def set_loads():
+        release.wait(5)
+
+    async def main():
+        task = asyncio.create_task(worker.run(set_loads, timeout=5))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(main())
+    assert worker.overdue == "set_loads"
+    release.set()
+    for _ in range(100):
+        if worker.last_overdue:
+            break
+        time.sleep(0.02)
+    assert worker.last_overdue["job"] == "set_loads" and worker.overdue is None
+
+
+def test_a_job_that_ends_as_its_caller_gives_up_is_recorded_not_left_overdue(worker):
+    from concurrent.futures import Future
+
+    fut = Future()
+    fut.set_running_or_notify_cancel()
+    fut.set_result("saved")  # finished just before the caller's time-out was handled
+
+    def save():
+        pass
+
+    error = worker._timed_out(fut, save, 0.1)
+    assert "still running" in str(error)
+    assert worker.overdue is None
+    assert worker.last_overdue["job"] == "save" and worker.last_overdue["ok"]

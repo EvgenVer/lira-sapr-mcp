@@ -22,6 +22,8 @@ def capture_window(hwnd: int) -> tuple[int, int, bytes]:
     reports a scaled-down size and the bitmap holds only the top-left part of the view.
     """
     user32 = ctypes.windll.user32
+    user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p  # a handle, not an int
+    user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
     previous = user32.SetThreadDpiAwarenessContext(DPI_PER_MONITOR_AWARE_V2)
     try:
         return _capture(hwnd)

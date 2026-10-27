@@ -42,8 +42,9 @@ CHECKS = {
                      "a year such as 2024"),
     "call_timeout_s": (lambda v: isinstance(v, int | float) and v > 0, "seconds above 0"),
     "analysis_timeout_s": (lambda v: isinstance(v, int | float) and v > 0, "seconds above 0"),
-    "backup_dir_name": (lambda v: isinstance(v, str) and v.strip() and not set(v) & set(r"\/:"),
-                        r"a folder name without \ / :"),
+    "backup_dir_name": (lambda v: isinstance(v, str) and v.strip(" .") != ""
+                        and not set(v) & set(r"\/:"),
+                        r"a folder name (not . or ..) without \ / :"),
     "log_file": (lambda v: isinstance(v, str) and v.strip(), "a file path"),
 }  # fmt: skip
 

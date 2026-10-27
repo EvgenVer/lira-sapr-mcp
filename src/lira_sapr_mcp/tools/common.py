@@ -7,9 +7,13 @@ from typing import Any, ParamSpec, TypeVar
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from lira_sapr_mcp.errors import LiraError
+from lira_sapr_mcp.errors import LiraError, LiraInputError
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True)
+
+# LIRA API functions each tool needs, filled by ``needs``: lira_status lists the tools a
+# connected LIRA release cannot run.
+REQUIRES: dict[str, tuple[str, ...]] = {}
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -48,3 +52,31 @@ async def backup_before_change(session: Any, ref: str) -> str | None:
         return None
     backup = session.backups.ensure(info.path)
     return str(backup) if backup else None
+
+
+def needs(session: Any, *capabilities: str) -> Callable[[Callable[P, Awaitable[R]]], Any]:
+    """Refuse a tool clearly when this LIRA release lacks an API function it needs."""
+
+    def wrap(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        REQUIRES[fn.__name__] = capabilities
+
+        @functools.wraps(fn)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            adapter = session.adapter
+            if not adapter.connected:
+                await session.run(adapter.connect)
+            missing = [c for c in capabilities if c not in adapter.capabilities]
+            if missing:
+                raise LiraInputError(
+                    f"{fn.__name__} needs {', '.join(missing)} of LIRA's API, which LIRA "
+                    f"{session.install.year} does not have"
+                )
+            return await fn(*args, **kwargs)
+
+        return wrapper
+
+    return wrap
+
+
+def unavailable_tools(capabilities: frozenset[str]) -> list[str]:
+    return sorted(t for t, caps in REQUIRES.items() if not set(caps) <= capabilities)
