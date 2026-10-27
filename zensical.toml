@@ -7,6 +7,8 @@ site_dir = "site"
 # a section is { "Section title" = [ "folder/page.md", ... ] }.
 nav = [
   "index.md",
+  "TASKS.md",
+  { "Исследования" = [ "research/lira-api.md" ] },
 ]
 
 [project.theme]
