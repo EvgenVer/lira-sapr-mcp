@@ -30,6 +30,7 @@ from lira_sapr_mcp.adapters.base import (
     parse_table_errors,
 )
 from lira_sapr_mcp.adapters.discovery import LiraInstall, lira_directories
+from lira_sapr_mcp.adapters.results import ResultsReader
 from lira_sapr_mcp.errors import LiraComError, LiraInputError
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class ComLiraAdapter:
         self._dirty_by_reads: set[str] = set()
         self.analysis = AnalysisState()
         self._events: Any = None
+        self.results = ResultsReader(install.year)
 
     # --- connection -----------------------------------------------------------------
 
@@ -130,6 +132,7 @@ class ComLiraAdapter:
         self._events = None
         self._app = None
         self._c = None
+        self.results.close()
         gc.collect()
 
     def _cast(self, obj: Any, iface: str) -> Any:
@@ -436,6 +439,18 @@ class ComLiraAdapter:
     def protocol(self, model_path: str) -> str | None:
         work = self.directories().get("WorkDirectory")
         return read_protocol(protocol_path(work, model_path)) if work else None
+
+    # --- results --------------------------------------------------------------------
+
+    def node_displacements(
+        self, model_path: str, nodes: list[int] | None, cases: list[int] | None
+    ) -> list[dict]:
+        return self.results.node_displacements(model_path, nodes, cases)
+
+    def bar_forces(
+        self, model_path: str, elements: list[int] | None, cases: list[int] | None
+    ) -> list[dict]:
+        return self.results.bar_forces(model_path, elements, cases)
 
     # --- units ----------------------------------------------------------------------
 

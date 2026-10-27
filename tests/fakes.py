@@ -95,6 +95,24 @@ class FakeAdapter:
         d["modified"] = True
         return []
 
+    def analysis_status(self):
+        return {"status": "idle", "model": None}
+
+    # Beam 1 with 3 sections in t*m; node 2 moving down 1.25 mm, in m.
+    def bar_forces(self, model_path, elements, cases):
+        if not Path(model_path).stem.startswith("frame"):
+            raise LiraInputError(f"No analysis results for {Path(model_path).stem!r}")
+        return [
+            {"element": 1, "case": 1, "section": s, "N": -1.0, "My": my, "Qz": 2.0}
+            for s, my in ((1, -2.0), (2, 3.0), (3, -2.0))
+        ]
+
+    def node_displacements(self, model_path, nodes, cases):
+        return [
+            {"node": n, "case": 1, "X": 0.0, "Z": -0.00125 * (n - 1), "UY": 0.001}
+            for n in nodes or [1, 2]
+        ]
+
     def units(self):
         return Units("m", "cm", "kN", "m", "kN", "m2", "mm", "kN", "m", "kN", "m2", "C")
 

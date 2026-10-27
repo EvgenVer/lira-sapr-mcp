@@ -7,7 +7,7 @@ from mcp.server import MCPServer
 
 from lira_sapr_mcp import __version__
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools import analysis, files, tables
+from lira_sapr_mcp.tools import analysis, files, results, tables
 
 INSTRUCTIONS = """\
 Drives LIRA-SAPR (LIRA-FEM) 2024 R2+ on this computer through its COM API.
@@ -16,6 +16,7 @@ Typical flow: lira_status -> lira_open_model or lira_create_model -> lira_model_
 Calls are executed one at a time by LIRA. Input tables use LIRA's current units, reported
 by lira_model_summary. A model argument is a .lir path or a model title; when omitted, the
 model active in LIRA is used. Files are backed up before the server first overwrites them.
+Results tools return extremes and the top rows only, converted to LIRA's current units.
 """
 
 
@@ -31,4 +32,5 @@ def build_server(session: LiraSession) -> MCPServer:
     files.register(mcp, session)
     tables.register(mcp, session)
     analysis.register(mcp, session)
+    results.register(mcp, session)
     return mcp
