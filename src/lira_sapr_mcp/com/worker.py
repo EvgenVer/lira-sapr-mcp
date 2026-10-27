@@ -10,6 +10,7 @@ import asyncio
 import logging
 import queue
 import threading
+import traceback
 from collections.abc import Callable
 from concurrent.futures import Future
 from typing import Any
@@ -37,6 +38,20 @@ def _pump() -> None:
     import pythoncom
 
     pythoncom.PumpWaitingMessages()
+
+
+def _drop_frame_locals(exc: BaseException) -> None:
+    """Free the locals kept in an exception's traceback before it leaves this thread.
+
+    They often hold COM objects; released later by the garbage collector on a thread
+    without COM, they fail with CO_E_NOTINITIALIZED.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        traceback.clear_frames(current.__traceback__)
+        current = current.__cause__ or current.__context__
 
 
 class ComWorker:
@@ -120,7 +135,8 @@ class ComWorker:
                 try:
                     fut.set_result(fn(*args, **kwargs))
                 except BaseException as exc:
-                    log.debug("job %s failed: %r", self._busy_with, exc)
+                    log.debug("job %s failed", self._busy_with, exc_info=exc)
+                    _drop_frame_locals(exc)
                     fut.set_exception(exc)
                 finally:
                     self._busy_with = None

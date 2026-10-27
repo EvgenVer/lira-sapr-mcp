@@ -15,7 +15,8 @@ EXAMPLE = "LIRA SAPR 2024/Manual/RU/01_плоская рама ЖБ/01_2D рам
 @pytest.fixture
 def mcp(tmp_path):
     session = LiraSession(Settings(log_file=tmp_path / "log.txt"))
-    return build_server(session)
+    yield build_server(session)
+    session.close()
 
 
 async def test_open_example_and_summarise(mcp, workdir):

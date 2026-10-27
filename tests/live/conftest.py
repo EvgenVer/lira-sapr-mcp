@@ -26,7 +26,8 @@ def adapter(worker):
         pytest.skip("no LIRA 2024+ installed")
     a = ComLiraAdapter(install)
     worker.call(a.connect, timeout=180)
-    return a
+    yield a
+    worker.call(a.disconnect, timeout=30)
 
 
 @pytest.fixture

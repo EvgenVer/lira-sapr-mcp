@@ -109,6 +109,31 @@ def _display_versions() -> dict[int, str]:
     return result
 
 
+def lira_directories(year: int) -> dict[str, str]:
+    """LIRA's own folders for one release: DataDirectory, TextDataDirectory, WorkDirectory,
+    ResultDirectory (user settings under HKCU)."""
+    import winreg
+
+    candidates = [
+        rf"Software\LIRA SAPR\LIRA SAPR {year}\Directories",
+        rf"Software\LIRA SAPR\LIRA-FEM {year}\Directories",
+        rf"Software\LIRA SAPPHIRE\LIRA SAPPHIRE {year}\Directories",
+    ]
+    for path in candidates:
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path)
+        except OSError:
+            continue
+        result = {}
+        with key:
+            for i in range(winreg.QueryInfoKey(key)[1]):
+                name, value, _ = winreg.EnumValue(key, i)
+                if isinstance(value, str) and value:
+                    result[name] = value
+        return result
+    return {}
+
+
 def find_installs() -> list[LiraInstall]:
     present = [p for p in candidate_progids() if _resolve_exe(p)]
     return collect_installs(present, _resolve_exe, _display_versions())

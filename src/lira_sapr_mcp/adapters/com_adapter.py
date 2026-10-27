@@ -7,7 +7,10 @@ tables of newer releases show up without code changes.
 
 import logging
 import os
+import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +22,7 @@ from lira_sapr_mcp.adapters.base import (
     normalize_rows,
     parse_table_errors,
 )
-from lira_sapr_mcp.adapters.discovery import LiraInstall
+from lira_sapr_mcp.adapters.discovery import LiraInstall, lira_directories
 from lira_sapr_mcp.errors import LiraComError, LiraInputError
 
 log = logging.getLogger(__name__)
@@ -40,6 +43,8 @@ APP_METHODS = (
     "StartUnzip",
     "StartCmd",
 )
+# Menu command "Create text file" (menu resource of Visor.resources.dll).
+EXPORT_TEXT_CMD = {2024: 5049}
 DOC_METHODS = ("SetGenerateCsvTables", "SetDeadWeightLoad", "SetSoilModel", "Select")
 
 
@@ -64,6 +69,9 @@ class ComLiraAdapter:
         self._c: Any = None
         self.capabilities: frozenset[str] = frozenset()
         self.table_kinds: dict[str, int] = {}
+        # Documents whose "modified" flag was set only by our own reads: LIRA marks a
+        # document modified when a scratch input table is created and removed in it.
+        self._dirty_by_reads: set[str] = set()
 
     # --- connection -----------------------------------------------------------------
 
@@ -102,6 +110,17 @@ class ComLiraAdapter:
         self.capabilities = frozenset(caps)
         log.info("connected to %s, capabilities: %s", self.install.progid, sorted(caps))
 
+    def disconnect(self) -> None:
+        """Drop our references to LIRA's COM objects (on the COM thread, before it ends).
+
+        LIRA keeps running with its documents; only this server lets go of it.
+        """
+        import gc
+
+        self._app = None
+        self._c = None
+        gc.collect()
+
     def _cast(self, obj: Any, iface: str) -> Any:
         import win32com.client
 
@@ -117,6 +136,26 @@ class ComLiraAdapter:
 
     # --- documents ------------------------------------------------------------------
 
+    @staticmethod
+    def _key(doc: Any) -> str:
+        return norm_path(str(doc.PathName)) or str(doc.Title).lower()
+
+    def _modified(self, doc: Any) -> bool:
+        return bool(doc.IsModified()) and self._key(doc) not in self._dirty_by_reads
+
+    @contextmanager
+    def _reading(self, doc: Any) -> Iterator[None]:
+        """Wrap a read that LIRA may count as a change of ``doc``."""
+        was_modified = self._modified(doc)
+        try:
+            yield
+        finally:
+            if not was_modified:
+                self._dirty_by_reads.add(self._key(doc))
+
+    def _changed(self, doc: Any) -> None:
+        self._dirty_by_reads.discard(self._key(doc))
+
     def _info(self, doc: Any, active_path: str | None = None) -> DocInfo:
         path = str(doc.PathName or "")
         if active_path is None:
@@ -126,7 +165,7 @@ class ComLiraAdapter:
             title=str(doc.Title),
             path=path,
             model_type=int(doc.SystemLabel),
-            modified=bool(doc.IsModified()),
+            modified=self._modified(doc),
             active=norm_path(path) == norm_path(active_path),
             saved=path.lower().endswith(".lir"),
         )
@@ -211,15 +250,18 @@ class ComLiraAdapter:
             if target.suffix.lower() != ".lir":
                 raise LiraInputError("LIRA models are saved with the .lir extension")
             target.parent.mkdir(parents=True, exist_ok=True)
+            self._changed(doc)
             self._call("SaveAs", doc.SaveAs, str(target.resolve()), False)
         else:
             if not str(doc.PathName).lower().endswith(".lir"):
                 raise LiraInputError("This model has never been saved: give a .lir path")
+            self._changed(doc)
             self._call("Save", doc.Save, False)
         return self._info(doc)
 
     def close_document(self, ref: str) -> None:
         doc = self.find_document(ref)
+        self._changed(doc)
         self._call("Close", doc.Close)
 
     # --- input tables -----------------------------------------------------------------
@@ -261,11 +303,12 @@ class ComLiraAdapter:
 
     def read_table(self, ref: str, name: str, numbers: list[int] | None = None) -> list[list]:
         doc = self.find_document(ref)
-        table = self._table(doc, name, numbers)
-        try:
-            data = self._call(f"read table {name}", table.GetContents, [])
-        finally:
-            self._drop_table(doc, table)
+        with self._reading(doc):
+            table = self._table(doc, name, numbers)
+            try:
+                data = self._call(f"read table {name}", table.GetContents, [])
+            finally:
+                self._drop_table(doc, table)
         return normalize_rows(data)
 
     def write_table(
@@ -273,6 +316,7 @@ class ComLiraAdapter:
     ) -> list[TableError]:
         """Replace the rows of a table (for ``numbers`` only, if given) and apply them."""
         doc = self.find_document(ref)
+        self._changed(doc)
         table = self._table(doc, name, numbers)
         try:
             data = [["" if cell is None else cell for cell in row] for row in rows]
@@ -284,6 +328,63 @@ class ComLiraAdapter:
         if not ok and not errors:
             errors = [TableError(-1, -1, "LIRA rejected the table without details")]
         return errors
+
+    # --- text format ----------------------------------------------------------------
+
+    def directories(self) -> dict[str, str]:
+        return lira_directories(self.install.year)
+
+    def export_text(self, ref: str, timeout_s: float = 120.0) -> str:
+        """The model in LIRA's text format, via the menu command "Create text file".
+
+        LIRA writes ``<text data folder>/<title>.txt``. A file of the same name that was
+        already there is set aside and put back afterwards.
+        """
+        doc = self.find_document(ref)
+        with self._reading(doc):
+            return self._export_text(doc, timeout_s)
+
+    def _export_text(self, doc: Any, timeout_s: float) -> str:
+        import pythoncom
+
+        doc.Activate()
+        dirs = self.directories()
+        folder = dirs.get("TextDataDirectory") or dirs.get("DataDirectory")
+        if not folder:
+            raise LiraComError("LIRA's data folder is not set in its settings (registry)")
+        target = Path(folder) / f"{doc.Title}.txt"
+        parked = None
+        if target.exists():
+            parked = target.with_name(f"{target.name}.{TEMP_TABLE_MARK}{uuid.uuid4().hex[:8]}")
+            target.rename(parked)
+        try:
+            cmd = EXPORT_TEXT_CMD.get(self.install.year, EXPORT_TEXT_CMD[2024])
+            self._call("StartCmd(Create text file)", self._app.StartCmd, cmd)
+            deadline = time.monotonic() + timeout_s
+            last_size = -1
+            while True:
+                pythoncom.PumpWaitingMessages()
+                if target.exists():
+                    size = target.stat().st_size
+                    if size > 0 and size == last_size:
+                        break
+                    last_size = size
+                if time.monotonic() > deadline:
+                    raise LiraComError(
+                        f"LIRA did not write the text export {target} within {timeout_s:.0f} s"
+                    )
+                time.sleep(0.2)
+            raw = target.read_bytes()
+        finally:
+            target.unlink(missing_ok=True)
+            if parked is not None:
+                parked.rename(target)
+        for encoding in ("utf-8-sig", "cp1251"):
+            try:
+                return raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        raise LiraComError(f"Cannot decode LIRA's text export {target}")
 
     # --- units ----------------------------------------------------------------------
 

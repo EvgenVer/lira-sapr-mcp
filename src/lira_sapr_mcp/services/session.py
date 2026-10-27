@@ -87,4 +87,9 @@ class LiraSession:
         return result
 
     def close(self) -> None:
+        if self._adapter is not None and self._adapter.connected:
+            try:
+                self.worker.call(self._adapter.disconnect, timeout=10)
+            except Exception:
+                log.warning("could not release LIRA cleanly", exc_info=True)
         self.worker.stop()

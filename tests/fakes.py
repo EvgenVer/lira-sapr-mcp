@@ -24,6 +24,9 @@ class FakeAdapter:
     def connect(self) -> None:
         self.connected = True
 
+    def disconnect(self) -> None:
+        self.connected = False
+
     def _get(self, ref: str | None) -> dict:
         key = ref or self.active
         for k, d in self.docs.items():
