@@ -71,6 +71,41 @@ NO_DCF = (
 )
 
 
+NO_DYNAMICS = "the model has no dynamic load cases, or run lira_run_analysis first"
+NO_DESIGN = (
+    "no reinforcement was selected: set reinforced concrete design data and run "
+    "lira_run_analysis (it includes the design stage)"
+)
+NO_FRAGMENT = "define a fragment for loads on fragment in LIRA and run lira_run_analysis"
+NO_PUNCHING = "define punching shear contours in LIRA and run lira_run_analysis"
+
+# Result name -> getter of ILiraPeriodsOfVibrationsResponse (arrays per mode).
+MODES = {
+    "period": "GetPeriods",
+    "frequency_hz": "GetFrequenciesHz",
+    "frequency_rad_s": "GetFrequenciesRadPerSec",
+    "modal_mass": "GetModalMasses",
+    "accumulated_modal_mass": "GetAccumulatedModalMasses",
+    "participation": "GetParticipFactors",
+}
+BAR_REINFORCEMENT = ("AU1", "AU2", "AU3", "AU4", "AS1", "AS2", "AS3", "AS4", "PERC",
+                     "ASW1", "ASW2")  # fmt: skip
+PLATE_AREAS = ("AS1", "AS2", "AS3", "AS4", "ASW1", "ASW2")
+REINFORCEMENT_NAMES = {"CrackSHORT": "crack_short", "CrackLONG": "crack_long"}
+REINFORCEMENT_NOT_COMPUTED = 200
+# LiraReinforcementErrorEnum; the numbered ones are LIRA's design error codes.
+REINFORCEMENT_ERRORS = {
+    -1: "section is not adequate",
+    -71: "LIRA design warning 71",
+    -67: "LIRA design warning 67",
+}
+REINFORCEMENT_WARNINGS = (-71, -67)  # the value is still given
+FRAGMENT = {1: "RX", 2: "RY", 3: "RZ", 4: "RUX", 5: "RUY", 6: "RUZ", 7: "RBW"}
+PUNCHING = {1: "N", 2: "MX", 3: "MY", 4: "QX", 5: "QY", 6: "MZ"}
+FRAGMENT_KIND = {"RX": F, "RY": F, "RZ": F, "RUX": M, "RUY": M, "RUZ": M, "RBW": BI}
+PUNCHING_KIND = {"N": F, "QX": F, "QY": F, "MX": M, "MY": M, "MZ": M}
+
+
 def force_kinds(family: str) -> dict[str, str]:
     """Unit kind of each component of a family, e.g. {"N": "force", "My": "moment"}."""
     code = next(c for c, (name, _) in FAMILIES.items() if name == family)
@@ -338,6 +373,132 @@ class ResultsReader:
                         rows.append(row)
         return rows
 
+    def periods(self, model_path: str, cases: list[int] | None) -> list[dict]:
+        """Modes of the dynamic load cases: period, frequencies, modal masses."""
+        resp = self._query(
+            model_path,
+            "kLiraRequest_PeriodsOfVibrations",
+            "ILiraPeriodsOfVibrationsRequest",
+            "PeriodsOfVibrations",
+            missing=NO_DYNAMICS,
+        )
+        dynamic = _numbers(resp.LoadCaseNumbers.AddToString())
+        missing = sorted(set(cases or []) - set(dynamic))
+        if missing:
+            raise LiraInputError(f"Load cases {missing} are not dynamic; dynamic: {dynamic}")
+        out = []
+        for case in [c for c in dynamic if cases is None or c in cases]:
+            columns = {
+                name: _doubles(getattr(resp, getter)(case)) for name, getter in MODES.items()
+            }
+            modes = [
+                {"mode": i + 1} | {name: values[i] for name, values in columns.items()
+                                   if i < len(values)}
+                for i in range(len(columns["period"]))
+            ]  # fmt: skip
+            code = int(resp.GetDynamicLoadCaseType(case))
+            out.append({"case": case, "type": code, "modes": modes})
+        return out
+
+    def reinforcement(
+        self, model_path: str, elements: list[int] | None, design_option: int = 1
+    ) -> list[dict]:
+        """Reinforcement selected by LIRA's design: bars per design section (asymmetric and
+        symmetric variants, when computed) and plates per element."""
+        elements = self._elements(model_path, elements)
+        wanted = " ".join(map(str, elements))
+
+        def fill(req: Any) -> None:
+            req.DesignOption = design_option
+            req.Elements.AddFromString(wanted)
+
+        resp = self._query(
+            model_path,
+            "kLiraRequest_SelectedReinforcement",
+            "ILiraSelectedReinforcementRequest",
+            "SelectedReinforcement",
+            fill,
+            missing=NO_DESIGN,
+        )
+        total = 1  # kLiraReinforcementData_Total
+        rows = []
+        for el in elements:
+            family = int(resp.GetFamily(el))
+            if family == 1:
+                for section in range(1, resp.GetSectionCount(el) + 1):
+                    for symmetric in (0, 1):
+                        values = {n: getattr(resp, f"GetBar{n}")(el, section, total, symmetric, 0)
+                                  for n in BAR_REINFORCEMENT}  # fmt: skip
+                        for n in ("CrackSHORT", "CrackLONG"):
+                            values[n] = getattr(resp, f"GetBar{n}")(el, section, symmetric, 0)
+                        # A variant LIRA did not design reads as zeros without cracks.
+                        if values["CrackSHORT"][1] == REINFORCEMENT_NOT_COMPUTED and not any(
+                            v for v, err in values.values() if err == 0
+                        ):
+                            continue
+                        row = _reinforcement_row("bar", el, values)
+                        if row is not None:
+                            rows.append(row | {"section": section, "symmetric": bool(symmetric)})
+            elif family == 2:
+                values = {n: getattr(resp, f"GetPlate{n}")(el, total, 0) for n in PLATE_AREAS}
+                for n in ("PercX", "PercY", "PercXY", "CrackSHORT", "CrackLONG"):
+                    values[n] = getattr(resp, f"GetPlate{n}")(el, 0)
+                row = _reinforcement_row("plate", el, values)
+                if row is not None:
+                    rows.append(row)
+        return rows
+
+    def fragment_loads(
+        self, model_path: str, nodes: list[int] | None, cases: list[int] | None
+    ) -> list[dict]:
+        """Loads that a fragment of the model transfers to its nodes (as LIRA's "loads
+        on fragment"), per node, load case and shape."""
+        return self._nodal_loads(
+            model_path, nodes, cases, "kLiraRequest_FragmLoadForces", "ILiraFragmLoadsRequest",
+            "FragmLoads", FRAGMENT, NO_FRAGMENT,
+        )  # fmt: skip
+
+    def punching_loads(
+        self, model_path: str, nodes: list[int] | None, cases: list[int] | None
+    ) -> list[dict]:
+        """Loads on punching shear contours around nodes, per node, load case and shape."""
+        return self._nodal_loads(
+            model_path, nodes, cases, "kLiraRequest_PunchLoadForces", "ILiraPunchLoadsRequest",
+            "PunchLoads", PUNCHING, NO_PUNCHING,
+        )  # fmt: skip
+
+    def _nodal_loads(
+        self,
+        model_path: str,
+        nodes: list[int] | None,
+        cases: list[int] | None,
+        kind: str,
+        iface: str,
+        method: str,
+        names: dict[int, str],
+        missing: str,
+    ) -> list[dict]:
+        def fill(req: Any) -> None:
+            if nodes:
+                req.Nodes.AddFromString(" ".join(map(str, nodes)))
+
+        resp = self._query(model_path, kind, iface, method, fill, missing=missing)
+        available = [c for c in _numbers(resp.Forces.AddToString()) if c in names]
+        getters = {c: getattr(resp, "GetNode" + names[c]) for c in available}
+        shapes = _shapes(resp.LoadCases, cases)
+        rows = []
+        for node in _numbers(resp.NodeNumbers.AddToString()):
+            for case, modes in shapes:
+                # Shapes by position, as for element forces (not checked on a live model).
+                for position, mode in modes:
+                    row: dict[str, Any] = {"node": node, "case": case}
+                    if len(modes) > 1:
+                        row["shape"] = mode
+                    for c, get in getters.items():
+                        row[names[c]] = float(get(node, case, position))
+                    rows.append(row)
+        return rows
+
 
 def _components(
     resp: Any, el: int, families: list[str] | None, cache: dict[int, Any]
@@ -392,6 +553,30 @@ def _limit_states(wanted: list[int] | None) -> list[int]:
     if bad:
         raise LiraInputError(f"Unknown limit states {bad}: use {LIMIT_STATES}")
     return sorted(set(wanted))
+
+
+def _reinforcement_row(family: str, el: int, values: dict[str, Any]) -> dict | None:
+    """One row of reinforcement, or None when LIRA computed nothing for this variant.
+
+    Each getter returns (value, error code): 0 = fine, 200 = not computed.
+    """
+    row: dict[str, Any] = {"family": family, "element": el}
+    errors = {}
+    for name, (value, err) in values.items():
+        key = REINFORCEMENT_NAMES.get(name, name)
+        if err == 0 or err in REINFORCEMENT_WARNINGS:
+            row[key] = float(value)
+        if err not in (0, REINFORCEMENT_NOT_COMPUTED):
+            errors[key] = REINFORCEMENT_ERRORS.get(int(err), f"LIRA design error {-int(err)}")
+    if len(row) == 2 and not errors:
+        return None
+    if errors:
+        row["errors"] = errors
+    return row
+
+
+def _doubles(arr: Any) -> list[float]:
+    return [float(arr.Item(i)) for i in range(arr.Count)]
 
 
 def _scode(exc: Exception) -> int | None:

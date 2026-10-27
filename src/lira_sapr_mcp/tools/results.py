@@ -6,7 +6,7 @@ from typing import Any
 from mcp.server import MCPServer
 
 from lira_sapr_mcp.adapters.base import norm_path, parse_numbers
-from lira_sapr_mcp.adapters.results import force_kinds
+from lira_sapr_mcp.adapters.results import FRAGMENT_KIND, PUNCHING_KIND, force_kinds
 from lira_sapr_mcp.services import results as rs
 from lira_sapr_mcp.services.session import LiraSession
 from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors
@@ -222,6 +222,126 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         )
         return await forces_answer(path, rows, components, sort_by, by_abs, top)
 
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_periods(
+        model: str | None = None, load_cases: list[int] | None = None
+    ) -> dict[str, Any]:
+        """Modes of the dynamic load cases (default all): per mode the period (s),
+        frequency (Hz and rad/s), modal mass and accumulated modal mass (% of the total)
+        and participation factor; "type" is LIRA's dynamic load type code (e.g. 35, 100).
+        """
+        path = await model_path(model)
+        cases = await session.run(session.adapter.periods, path, load_cases)
+        return {"model": path, "load_cases": cases}
+
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_reinforcement(
+        model: str | None = None,
+        elements: list[int] | str | None = None,
+        design_option: int = 1,
+        components: list[str] | None = None,
+        sort_by: str | None = None,
+        by_abs: bool = True,
+        top: int | None = 20,
+    ) -> dict[str, Any]:
+        """Reinforcement selected by LIRA's reinforced concrete design (design_option:
+        LIRA's design variant, default 1). Fixed units: areas cm2 (plates cm2 per m),
+        PERC/Perc* %, crack widths mm.
+
+        bar rows: element, design section, "symmetric" (LIRA designs both an asymmetric and
+        a symmetric variant when asked), AU1-AU4 (corner bars), AS1-AS4 (bars along the
+        faces), PERC, ASW1, ASW2 (stirrups), crack_short, crack_long. plate rows: AS1-AS4
+        (AS1, AS2 along local X bottom/top, AS3, AS4 along Y), PercX, PercY, PercXY, ASW1,
+        ASW2, crack_short, crack_long. "errors" names values LIRA could not select.
+        components, sort_by, by_abs, top: as in lira_element_forces.
+        """
+        path = await model_path(model)
+        rows = await session.run(
+            session.adapter.reinforcement,
+            path,
+            parse_numbers(elements),
+            design_option,
+            timeout=session.settings.call_timeout_s * 5,
+        )
+        by_family: dict[str, list[dict]] = {}
+        for row in rows:
+            by_family.setdefault(row.pop("family"), []).append(row)
+        result: dict[str, Any] = {"model": path, "families": {}}
+        for family, family_rows in by_family.items():
+            names = sorted({k for r in family_rows for k in r} - set(rs.LOCATION_KEYS) - {"errors"})
+            wanted = components or names
+            summary = (
+                rs.summarize(family_rows, wanted, sort_by=sort_by, by_abs=by_abs, top=top)
+                if not sort_by or sort_by in names
+                else rs.summarize(family_rows, wanted, top=top)
+            )
+            failed = [
+                {"element": r["element"], **r["errors"]} for r in family_rows if "errors" in r
+            ]
+            if failed:
+                summary["errors"] = failed[:50]
+            result["families"][family] = summary
+        if not by_family:
+            result["note"] = "no reinforced concrete bars or plates among these elements"
+        return result
+
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_fragment_loads(
+        model: str | None = None,
+        nodes: list[int] | str | None = None,
+        load_cases: list[int] | None = None,
+        components: list[str] | None = None,
+        sort_by: str | None = None,
+        by_abs: bool = True,
+        top: int | None = 20,
+    ) -> dict[str, Any]:
+        """Loads on fragment: forces RX, RY, RZ, moments RUX, RUY, RUZ and bimoment RBW
+        that the fragment defined in LIRA transfers to its nodes, per node and load case.
+        Arguments and the answer as in lira_node_displacements.
+        """
+        path = await model_path(model)
+        rows = await session.run(
+            session.adapter.fragment_loads, path, parse_numbers(nodes), load_cases
+        )
+        return await answer(
+            path, rows, FRAGMENT_KIND, await force_units(), components, sort_by, by_abs, top
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_punching_loads(
+        model: str | None = None,
+        nodes: list[int] | str | None = None,
+        load_cases: list[int] | None = None,
+        components: list[str] | None = None,
+        sort_by: str | None = None,
+        by_abs: bool = True,
+        top: int | None = 20,
+    ) -> dict[str, Any]:
+        """Loads on punching shear contours around nodes (N, QX, QY forces; MX, MY, MZ
+        moments) per node and load case, for contours defined in LIRA. Arguments and the
+        answer as in lira_node_displacements.
+        """
+        path = await model_path(model)
+        rows = await session.run(
+            session.adapter.punching_loads, path, parse_numbers(nodes), load_cases
+        )
+        return await answer(
+            path, rows, PUNCHING_KIND, await force_units(), components, sort_by, by_abs, top
+        )
+
+    async def force_units() -> dict[str, str]:
+        u = await session.run(session.adapter.units)
+        return {
+            "force": u.forces,
+            "moment_length": u.forces_per,
+            "stress": u.stresses,
+            "stress_length": u.stresses_per,
+        }
+
     async def forces_answer(
         path: str,
         rows: list[dict],
@@ -231,13 +351,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         top: int | None,
     ) -> dict[str, Any]:
         """Convert and reduce force rows separately for each element family."""
-        u = await session.run(session.adapter.units)
-        units = {
-            "force": u.forces,
-            "moment_length": u.forces_per,
-            "stress": u.stresses,
-            "stress_length": u.stresses_per,
-        }
+        units = await force_units()
         by_family: dict[str, list[dict]] = {}
         for row in rows:
             by_family.setdefault(row.pop("family"), []).append(row)

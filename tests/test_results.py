@@ -151,6 +151,41 @@ async def test_combination_tools(tmp_path):
     assert row["N"] == pytest.approx(-19.6133)
 
 
+@pytest.mark.anyio
+async def test_periods_reinforcement_fragment_and_punching(tmp_path):
+    session, _ = fake_session(tmp_path)
+    model = str(tmp_path / "frame.lir")
+    async with Client(build_server(session)) as client:
+        periods = await client.call_tool("lira_periods", {"model": model})
+        rebar = await client.call_tool("lira_reinforcement", {"model": model})
+        fragment = await client.call_tool("lira_fragment_loads", {"model": model})
+        punching = await client.call_tool("lira_punching_loads", {"model": model})
+    (case,) = periods.structured_content["load_cases"]
+    assert case["modes"][0]["period"] == 0.43
+    bar = rebar.structured_content["families"]["bar"]
+    assert bar["rows"] == [
+        {"element": 1, "section": 1, "symmetric": True, "AU1": 2.28, "PERC": 0.47}
+    ]
+    plate = rebar.structured_content["families"]["plate"]
+    assert plate["errors"] == [{"element": 2, "AS2": "section is not adequate"}]
+    assert "errors" not in plate["rows"][0]
+    units = fragment.structured_content["units"]
+    assert units["RZ"] == "kN" and units["RUY"] == "kN*m"
+    assert fragment.structured_content["extremes"]["RZ"]["max"]["value"] == pytest.approx(19.6133)
+    assert punching.structured_content["extremes"]["N"]["max"]["value"] == pytest.approx(29.42)
+
+
+def test_reinforcement_rows_keep_values_and_name_errors():
+    from lira_sapr_mcp.adapters.results import _reinforcement_row
+
+    row = _reinforcement_row(
+        "bar", 1, {"AU1": (2.0, 0), "AS1": (0.0, -1), "PERC": (0.4, -71), "AU2": (0.0, 200)}
+    )
+    assert row["AU1"] == 2.0 and row["PERC"] == 0.4 and "AU2" not in row
+    assert row["errors"] == {"AS1": "section is not adequate", "PERC": "LIRA design warning 71"}
+    assert _reinforcement_row("bar", 1, {"AU1": (0.0, 200)}) is None
+
+
 def test_no_results_code_is_read_from_com_exception_info():
     from lira_sapr_mcp.adapters.results import NO_RESULTS_HRESULT, _scode
 

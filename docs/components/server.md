@@ -45,7 +45,8 @@ flowchart LR
 | Расчёт | `lira_run_analysis`, `lira_analysis_status`, `lira_stop_analysis`, `lira_analysis_protocol` | `tools/analysis.py` |
 | Результаты | `lira_node_displacements`, `lira_element_forces` (стержни, пластины, объёмные и специальные КЭ; формы динамических загружений) | `tools/results.py` |
 | РСН и РСУ | `lira_load_combinations`, `lira_combination_displacements`, `lira_combination_forces` (по предельным состояниям), `lira_design_forces` (с критерием, группой и составом загружений) | `tools/results.py` |
-| Периоды, арматура, фрагмент, продавливание, огибающие, экспорт CSV/Excel | — | этап 2 |
+| Динамика, арматура, узловые нагрузки | `lira_periods` (периоды, частоты, модальные массы), `lira_reinforcement` (подобранная арматура стержней и пластин, трещины), `lira_fragment_loads`, `lira_punching_loads` | `tools/results.py` |
+| Огибающие, отбор по порогу, экспорт CSV/Excel | — | этап 2 |
 | Высокий уровень, скрипт агента, справочник таблиц | — | этап 2 |
 | Диалоги ЛИРЫ, картинка модели | — | этап 3 |
 

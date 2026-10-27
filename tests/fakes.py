@@ -156,6 +156,25 @@ class FakeAdapter:
             for c in combinations or [1, 2]
         ]  # fmt: skip
 
+    def periods(self, model_path, cases):
+        modes = [{"mode": 1, "period": 0.43, "modal_mass": 44.3},
+                 {"mode": 2, "period": 0.35, "modal_mass": 0.0}]  # fmt: skip
+        return [{"case": 4, "type": 35, "modes": modes}]
+
+    def reinforcement(self, model_path, elements, design_option=1):
+        return [
+            {"family": "bar", "element": 1, "section": 1, "symmetric": True, "AU1": 2.28,
+             "PERC": 0.47},
+            {"family": "plate", "element": 2, "AS1": 6.1, "AS3": 6.56,
+             "errors": {"AS2": "section is not adequate"}},
+        ]  # fmt: skip
+
+    def fragment_loads(self, model_path, nodes, cases):
+        return [{"node": 1, "case": 1, "RZ": 2.0, "RUY": 1.0}]
+
+    def punching_loads(self, model_path, nodes, cases):
+        return [{"node": 1, "case": 1, "N": 3.0}]
+
     def design_forces(self, model_path, elements, families, limit_states):
         return [
             {"family": "bar", "element": 1, "section": 1, "limit_state": "ultimate", "dcf": 1,

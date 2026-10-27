@@ -113,6 +113,17 @@ async def test_design_forces_and_missing_combinations_of_example_01(mcp, workdir
             "lira_design_forces", {"model": path, "elements": [1], "limit_states": [1]}
         )
         dcl = await client.call_tool("lira_combination_forces", {"model": path})
+        rebar = await client.call_tool("lira_reinforcement", {"model": path, "elements": "1-3"})
+        fragment = await client.call_tool("lira_fragment_loads", {"model": path})
+        punching = await client.call_tool("lira_punching_loads", {"model": path})
+    assert not rebar.is_error, rebar.content
+    bars = rebar.structured_content["families"]["bar"]
+    # Only the symmetric variant is selected in this example: AU1 = 2.28 cm2 at element 1.
+    assert all(r["symmetric"] for r in bars["rows"])
+    first = next(r for r in bars["rows"] if r["element"] == 1 and r["section"] == 1)
+    assert first["AU1"] == pytest.approx(2.28, abs=0.01)
+    assert fragment.is_error and "define a fragment" in fragment.content[0].text
+    assert punching.is_error and "punching shear contours" in punching.content[0].text
     assert not design.is_error, design.content
     bar = design.structured_content["families"]["bar"]
     assert bar["total_rows"] >= 5
@@ -154,7 +165,15 @@ async def test_plates_and_dynamic_shapes_of_example_04(mcp, workdir):
         dcl_moved = await client.call_tool(
             "lira_combination_displacements", {"model": path, "nodes": "2"}
         )
+        periods = await client.call_tool("lira_periods", {"model": path})
+        rebar = await client.call_tool("lira_reinforcement", {"model": path, "elements": "109"})
     assert not forces.is_error, forces.content
+    (seismic,) = periods.structured_content["load_cases"]
+    assert seismic["case"] == 4 and len(seismic["modes"]) == 13
+    assert seismic["modes"][0]["period"] == pytest.approx(0.4294, abs=1e-3)
+    assert seismic["modes"][0]["modal_mass"] == pytest.approx(44.29, abs=0.01)
+    plate = rebar.structured_content["families"]["plate"]
+    assert plate["rows"][0]["AS1"] == pytest.approx(4.087, abs=0.01)
     combos = listed.structured_content
     assert combos["code"] == "SP" and len(combos["combinations"]) == 3
     assert [c["seismic"] for c in combos["combinations"]] == [False, True, True]

@@ -100,7 +100,8 @@ def summarize(
         )
     limit = min(top, max_rows) if top else max_rows
     shown = [
-        {k: _round(v) for k, v in r.items() if k in present or k in _KEYS} for r in selected[:limit]
+        {k: _round(v) for k, v in r.items() if k in present or k in LOCATION_KEYS}
+        for r in selected[:limit]
     ]
     result: dict[str, Any] = {
         "total_rows": len(rows),
@@ -119,13 +120,14 @@ def summarize(
 
 
 # Where a value is: kept in every row shown and in the place of each extreme.
-_KEYS = (
+LOCATION_KEYS = (
     "node",
     "element",
     "case",
     "combination",
     "shape",
     "section",
+    "symmetric",
     "limit_state",
     "dcf",
     "criterion",
@@ -136,7 +138,7 @@ _KEYS = (
 
 
 def _where(row: dict) -> dict:
-    return {k: row[k] for k in _KEYS if k in row}
+    return {k: row[k] for k in LOCATION_KEYS if k in row}
 
 
 def _round(v: Any) -> Any:

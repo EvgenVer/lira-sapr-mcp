@@ -503,6 +503,24 @@ class ComLiraAdapter:
     ) -> list[dict]:
         return self.results.design_forces(model_path, elements, families, limit_states)
 
+    def periods(self, model_path: str, cases: list[int] | None) -> list[dict]:
+        return self.results.periods(model_path, cases)
+
+    def reinforcement(
+        self, model_path: str, elements: list[int] | None, design_option: int = 1
+    ) -> list[dict]:
+        return self.results.reinforcement(model_path, elements, design_option)
+
+    def fragment_loads(
+        self, model_path: str, nodes: list[int] | None, cases: list[int] | None
+    ) -> list[dict]:
+        return self.results.fragment_loads(model_path, nodes, cases)
+
+    def punching_loads(
+        self, model_path: str, nodes: list[int] | None, cases: list[int] | None
+    ) -> list[dict]:
+        return self.results.punching_loads(model_path, nodes, cases)
+
     # --- units ----------------------------------------------------------------------
 
     def units(self) -> Units:
