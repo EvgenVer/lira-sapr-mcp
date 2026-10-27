@@ -58,6 +58,10 @@ async def test_stiffer_group_moves_less(mcp, workdir):
         )  # fmt: skip
         weight = await ok(client, "lira_self_weight", {"load_case": 2, "safety_factor": 1.1})
         loads = await ok(client, "lira_read_loads", {"load_cases": [2]})
+        # Only element 3, though the user had elements 1 and 2 selected in LIRA.
+        await ok(client, "lira_run_script", {"code": "doc.Select('1 2', 0)"})
+        await ok(client, "lira_self_weight", {"load_case": 3, "elements": [3]})
+        only = await ok(client, "lira_read_loads", {"load_cases": [3]})
         await ok(client, "lira_save_model", {})
         stiffer = await largest_z(client, path)
     assert copied["stiffness"] == 2
@@ -68,6 +72,7 @@ async def test_stiffer_group_moves_less(mcp, workdir):
     assert {ld["target"] for ld in loads["loads"]} == {1, 2, 3}
     assert all(ld["type"] == 16 for ld in loads["loads"])
     assert loads["loads"][0]["values"][0] == pytest.approx(5.5, abs=0.01)
+    assert [(ld["target"], ld["type"]) for ld in only["loads"]] == [(3, 16)]
     assert wider == pytest.approx(before / 2, rel=1e-3)
     # The factor changed nothing; case 2 (self weight, 5.5 t/m) moves less than case 1.
     assert stiffer == pytest.approx(wider, rel=1e-6)

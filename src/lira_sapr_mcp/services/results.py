@@ -84,16 +84,21 @@ def summarize(
 
     keep: more keys to show in rows (e.g. the envelope's ``<c>_min`` and ``<c>_max_at``).
     """
+    if top is not None and top < 1:
+        raise LiraInputError("top must be at least 1 (or null for up to 500 rows)")
     present = [c for c in components if any(c in r for r in rows)]
     unknown = sorted(set(components) - set(present))
     extremes = {}
     for comp in present:
         vals = [r for r in rows if comp in r]
-        lo = min(vals, key=lambda r: r[comp])
-        hi = max(vals, key=lambda r: r[comp])
+        # Envelope rows keep both ends: the minimum from <c>_min, the maximum from <c>_max.
+        lo_key = f"{comp}_min" if all(f"{comp}_min" in r for r in vals) else comp
+        hi_key = f"{comp}_max" if all(f"{comp}_max" in r for r in vals) else comp
+        lo = min(vals, key=lambda r: r[lo_key])
+        hi = max(vals, key=lambda r: r[hi_key])
         extremes[comp] = {
-            "min": {"value": lo[comp], "at": _where(lo)},
-            "max": {"value": hi[comp], "at": _where(hi)},
+            "min": {"value": lo[lo_key], "at": _where(lo, lo_key)},
+            "max": {"value": hi[hi_key], "at": _where(hi, hi_key)},
         }
     selected = rows
     if sort_by:
@@ -148,6 +153,49 @@ VARIANT_KEYS = ("case", "combination", "shape", "limit_state", "dcf", "criterion
                 "load_cases", "with")  # fmt: skip
 
 
+def reduce_tables(
+    tables: dict[str, list[dict]],
+    units_of: dict[str, dict[str, str]],
+    *,
+    components: list[str] | None,
+    sort_by: str | None,
+    by_abs: bool,
+    top: int | None,
+    at_least: float | None,
+    with_envelope: bool,
+) -> tuple[dict[str, Any], dict[str, list[dict]], dict[str, dict[str, str]]]:
+    """Per table: envelope, then threshold, then extremes and top rows.
+
+    Returns the answers, the full tables to export and the units of their columns.
+    """
+    if at_least is not None and not sort_by:
+        raise LiraInputError("threshold needs sort_by: the component to compare")
+    answers: dict[str, Any] = {}
+    full: dict[str, list[dict]] = {}
+    full_units: dict[str, dict[str, str]] = {}
+    for name, rows in tables.items():
+        units = dict(units_of[name])
+        wanted = components or [c for c in units if any(c in r for r in rows)]
+        keep: tuple[str, ...] = ()
+        if with_envelope:
+            rows = envelope(rows, wanted)
+            keep = tuple(f"{c}_{e}" for c in wanted for e in ("min", "max", "min_at", "max_at"))
+            for c in wanted:
+                if c in units:
+                    units[f"{c}_min"] = units[f"{c}_max"] = units[c]
+        has_sort = bool(sort_by) and any(sort_by in r for r in rows)
+        if at_least is not None and has_sort:
+            rows = threshold(rows, sort_by, at_least, by_abs)
+        summary = summarize(
+            rows, wanted, sort_by=sort_by if has_sort else None, by_abs=by_abs, top=top, keep=keep
+        )
+        if sort_by and not has_sort:
+            summary["note"] = f"no {sort_by} in {name}: rows are not sorted or filtered"
+        summary["units"] = {c: units[c] for c in wanted if c in units}
+        answers[name], full[name], full_units[name] = summary, rows, units
+    return answers, full, full_units
+
+
 def threshold(rows: list[dict], component: str, value: float, by_abs: bool = True) -> list[dict]:
     """Rows whose component reaches the threshold (by absolute value unless by_abs=False)."""
     if by_abs:
@@ -186,9 +234,12 @@ def envelope(rows: list[dict], components: list[str]) -> list[dict]:
     return out
 
 
-def export(tables: dict[str, list[dict]], units: dict[str, str], path: str) -> dict[str, Any]:
+def export(
+    tables: dict[str, list[dict]], units_of: dict[str, dict[str, str]], path: str
+) -> dict[str, Any]:
     """Write full tables to .csv (one file; a "family" column when several tables) or .xlsx
-    (a sheet per table). Column headers carry units, e.g. "My, kN*m"."""
+    (a sheet per table). Column headers carry each table's own units, e.g. "My, kN*m", so
+    same-named components of different units stay in separate columns."""
     import pandas as pd
 
     target = Path(path)
@@ -198,23 +249,28 @@ def export(tables: dict[str, list[dict]], units: dict[str, str], path: str) -> d
     if suffix not in (".csv", ".xlsx"):
         raise LiraInputError("export_path must end with .csv or .xlsx")
 
-    def frame(rows: list[dict]) -> Any:
-        df = pd.DataFrame([{k: _cell(v) for k, v in r.items()} for r in rows])
+    def frame(name: str) -> Any:
+        units = units_of.get(name, {})
+        df = pd.DataFrame([{k: _cell(v) for k, v in r.items()} for r in tables[name]])
         return df.rename(columns={c: f"{c}, {units[c]}" for c in df.columns if c in units})
 
+    replaced = target.exists()
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         if suffix == ".csv":
-            frames = [frame(rows).assign(**({"family": name} if len(tables) > 1 else {}))
-                      for name, rows in tables.items()]  # fmt: skip
-            pd.concat(frames, ignore_index=True).to_csv(target, index=False, encoding="utf-8-sig")
+            frames = [frame(n).assign(**({"family": n} if len(tables) > 1 else {}))
+                      for n in tables]  # fmt: skip
+            data = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            data.to_csv(target, index=False, encoding="utf-8-sig")
         else:
             with pd.ExcelWriter(target, engine="openpyxl") as writer:
-                for name, rows in tables.items():
-                    frame(rows).to_excel(writer, sheet_name=name[:31] or "results", index=False)
-    except OSError as exc:
+                for n in tables or {"results": []}:
+                    df = frame(n) if n in tables else pd.DataFrame()
+                    df.to_excel(writer, sheet_name=n[:31] or "results", index=False)
+    except (OSError, ValueError) as exc:
         raise LiraInputError(f"Could not write {target}: {exc}") from exc
-    return {"path": str(target), "rows": sum(len(r) for r in tables.values())}
+    rows = sum(len(r) for r in tables.values())
+    return {"path": str(target), "rows": rows, "replaced_existing_file": replaced}
 
 
 def _cell(v: Any) -> Any:
@@ -224,8 +280,10 @@ def _cell(v: Any) -> Any:
     return v
 
 
-def _where(row: dict) -> dict:
-    return {k: row[k] for k in LOCATION_KEYS if k in row}
+def _where(row: dict, key: str = "") -> dict:
+    where = {k: row[k] for k in LOCATION_KEYS if k in row}
+    variant = row.get(f"{key}_at")  # an envelope row: where its min or max occurs
+    return where | variant if isinstance(variant, dict) else where
 
 
 def _round(v: Any) -> Any:

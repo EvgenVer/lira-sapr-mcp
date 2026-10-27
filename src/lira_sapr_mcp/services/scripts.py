@@ -2,8 +2,9 @@
 
 The script sees the names it is given (LIRA's application, the document, the adapter),
 prints with ``print`` and returns a value by assigning ``result``. A time limit stops
-Python code between lines; a single COM call that hangs is not interrupted (the worker's
-own timeout then answers the agent).
+the script between its own lines; a COM call or a server function that hangs is not
+interrupted, and neither is a script that catches BaseException (the worker's own
+timeout then answers the agent).
 """
 
 import io
@@ -17,8 +18,8 @@ MAX_TEXT = 20_000
 FILENAME = "<script>"
 
 
-class ScriptTimeout(Exception):
-    pass
+class ScriptTimeout(BaseException):
+    """Not an Exception, so that the script's own ``except Exception`` cannot swallow it."""
 
 
 def run_script(code: str, names: dict[str, Any], timeout_s: float) -> dict[str, Any]:
@@ -37,6 +38,9 @@ def run_script(code: str, names: dict[str, Any], timeout_s: float) -> dict[str, 
     deadline = time.monotonic() + timeout_s
 
     def trace(frame: Any, event: str, arg: Any) -> Any:
+        # Only the script's own lines: never stop inside the server's or pywin32's code.
+        if frame.f_code.co_filename != FILENAME:
+            return None
         if time.monotonic() > deadline:
             raise ScriptTimeout(f"the script ran longer than {timeout_s:g} s and was stopped")
         return trace

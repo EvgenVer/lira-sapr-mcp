@@ -373,14 +373,19 @@ class ComLiraAdapter:
         doc.CurrentLoadCase = load_case
         if not elements:
             return str(self._call("SetDeadWeightLoad", doc.SetDeadWeightLoad, DEAD_ALL, factor))
-        numbers = " ".join(map(str, elements))
-        self._call("Select", doc.Select, numbers, SEL_ELEMENTS)
+        # LIRA adds to the selection: clear it first, or the user's selection gets loads too.
+        # The user's element selection in LIRA's window is therefore lost.
+        self._call("Unselect", doc.Unselect, "all", SEL_ELEMENTS)
+        self._call("Select", doc.Select, " ".join(map(str, elements)), SEL_ELEMENTS)
         try:
             return str(
                 self._call("SetDeadWeightLoad", doc.SetDeadWeightLoad, DEAD_SELECTED, factor)
             )
         finally:
-            self._call("Unselect", doc.Unselect, "all", SEL_ELEMENTS)
+            try:
+                self._call("Unselect", doc.Unselect, "all", SEL_ELEMENTS)
+            except LiraComError:
+                log.warning("Could not clear the selection after adding self weight")
 
     def run_script(self, code: str, ref: str | None, timeout_s: float) -> dict[str, Any]:
         """Run the agent's Python code with LIRA's objects (see services/scripts.py)."""

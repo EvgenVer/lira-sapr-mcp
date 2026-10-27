@@ -220,15 +220,23 @@ def test_envelope_per_element_and_section_over_cases():
     assert second["N"] == -4.0
 
 
-def test_export_csv_with_units_and_family_column(tmp_path):
+def test_export_csv_keeps_each_familys_units_apart(tmp_path):
     import pandas as pd
 
-    tables = {"bar": cases_rows(), "plate": [{"element": 9, "case": 1, "Nx": 2.0}]}
-    out = rs.export(tables, {"N": "kN", "My": "kN*m", "Nx": "kPa"}, str(tmp_path / "f.csv"))
-    assert out == {"path": str(tmp_path / "f.csv"), "rows": 5}
-    df = pd.read_csv(tmp_path / "f.csv", encoding="utf-8-sig")
-    assert {"My, kN*m", "Nx, kPa", "family"} <= set(df.columns)
-    assert list(df["family"]) == ["bar"] * 4 + ["plate"]
+    # Bars and plates both have Mx, in different units: two columns, not one.
+    tables = {
+        "bar": [{"element": 1, "case": 1, "Mx": 1.0}],
+        "plate": [{"element": 9, "case": 1, "Mx": 2.0}],
+    }
+    units = {"bar": {"Mx": "kN*m"}, "plate": {"Mx": "kN*m/m"}}
+    target = tmp_path / "f.csv"
+    out = rs.export(tables, units, str(target))
+    again = rs.export(tables, units, str(target))
+    assert out == {"path": str(target), "rows": 2, "replaced_existing_file": False}
+    assert again["replaced_existing_file"] is True
+    df = pd.read_csv(target, encoding="utf-8-sig")
+    assert list(df["family"]) == ["bar", "plate"]
+    assert df["Mx, kN*m"].tolist()[0] == 1.0 and df["Mx, kN*m/m"].tolist()[1] == 2.0
 
 
 def test_export_xlsx_sheet_per_table_and_nested_cells(tmp_path):
@@ -236,11 +244,17 @@ def test_export_xlsx_sheet_per_table_and_nested_cells(tmp_path):
 
     env = rs.envelope(cases_rows(), ["My"])
     path = tmp_path / "sub" / "env.xlsx"
-    rs.export({"bar": env}, {"My": "kN*m", "My_min": "kN*m"}, str(path))
+    rs.export({"bar": env}, {"bar": {"My": "kN*m", "My_min": "kN*m"}}, str(path))
     sheets = pd.read_excel(path, sheet_name=None)
     assert list(sheets) == ["bar"]
     assert sheets["bar"]["My_max_at"][0] == "case=2"
     assert "My_min, kN*m" in sheets["bar"].columns
+
+
+def test_export_of_nothing_writes_an_empty_file(tmp_path):
+    assert rs.export({}, {}, str(tmp_path / "e.csv"))["rows"] == 0
+    assert rs.export({}, {}, str(tmp_path / "e.xlsx"))["rows"] == 0
+    assert (tmp_path / "e.xlsx").stat().st_size > 0
 
 
 def test_export_needs_an_absolute_csv_or_xlsx_path(tmp_path):
@@ -271,7 +285,7 @@ async def test_tools_take_threshold_envelope_and_export(tmp_path):
     assert not big.is_error, big.content
     bar = big.structured_content["families"]["bar"]
     assert bar["total_rows"] == 1 and bar["rows"][0]["section"] == 2
-    assert big.structured_content["export"] == {"path": str(target), "rows": 2}
+    assert big.structured_content["export"]["rows"] == 2
     assert bad.is_error and "threshold needs sort_by" in bad.content[0].text
 
 
@@ -289,3 +303,28 @@ def test_results_summary_notes_foreign_results():
     fresh = {"present": True, "nodes": 2, "elements": 1}
     assert "note" not in results_summary(ResultsOnly(fresh), "m.lir", 2, 1)
     assert "same name" in results_summary(ResultsOnly(fresh), "m.lir", 5, 1)["note"]
+
+
+def test_envelope_extremes_keep_both_ends():
+    # One element, My from -10 to +9: the maximum is 9, not the larger magnitude.
+    rows = [{"element": 1, "case": 1, "My": -10.0}, {"element": 1, "case": 2, "My": 9.0}]
+    answer = rs.summarize(rs.envelope(rows, ["My"]), ["My"])
+    assert answer["extremes"]["My"]["max"] == {"value": 9.0, "at": {"element": 1, "case": 2}}
+    assert answer["extremes"]["My"]["min"] == {"value": -10.0, "at": {"element": 1, "case": 1}}
+
+
+def test_threshold_applies_to_the_envelope_not_before_it():
+    rows = [{"element": 1, "case": 1, "My": -3.0}, {"element": 1, "case": 2, "My": 12.0},
+            {"element": 2, "case": 1, "My": 4.0}]  # fmt: skip
+    answers, full, units = rs.reduce_tables(
+        {"bar": rows}, {"bar": {"My": "kN*m"}}, components=None, sort_by="My", by_abs=True,
+        top=None, at_least=10.0, with_envelope=True,
+    )  # fmt: skip
+    (row,) = full["bar"]
+    assert (row["My_min"], row["My_max"]) == (-3.0, 12.0)  # case 1 is still in the envelope
+    assert answers["bar"]["total_rows"] == 1 and units["bar"]["My_min"] == "kN*m"
+
+
+def test_top_must_be_positive():
+    with pytest.raises(LiraInputError, match="at least 1"):
+        rs.summarize(rows(), ["N"], top=0)

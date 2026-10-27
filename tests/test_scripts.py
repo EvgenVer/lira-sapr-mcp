@@ -36,6 +36,27 @@ def test_a_long_script_is_stopped_and_tracing_is_restored():
     assert sys.gettrace() is before
 
 
+def test_the_scripts_own_error_handling_does_not_defeat_the_limit():
+    code = "while True:\n    try:\n        x = 1\n    except Exception:\n        pass"
+    answer = run_script(code, {}, timeout_s=0.3)
+    assert not answer["ok"] and "ScriptTimeout" in answer["error"]
+
+
+def test_the_limit_does_not_fire_inside_called_functions():
+    finished = []
+
+    def slow():  # stands for a server function or a COM call made by the script
+        import time
+
+        time.sleep(0.5)
+        finished.append(True)
+
+    answer = run_script("slow()\nx = 1", {"slow": slow}, timeout_s=0.2)
+    # The function ran to its end; the script stopped when it came back.
+    assert finished == [True]
+    assert not answer["ok"] and "line 2" in answer["error"]
+
+
 def test_odd_and_large_results_are_made_safe():
     assert run_script("result = object", {}, timeout_s=5)["result"] == "<class 'object'>"
     big = run_script("result = 'x' * 50000\nprint('y' * 50000)", {}, timeout_s=5)

@@ -89,7 +89,7 @@ def copy_stiffness(adapter: Any, ref: str, source: int, changes: dict[str, float
         if not pattern.search(text):
             have = sorted(set(re.findall(r"(?<![\w])(\w+):", text)) - set(DERIVED))
             raise LiraInputError(f"Stiffness {source} has no parameter {name!r}; it has {have}")
-        text = pattern.sub(f"{name}:{value:g}", text)
+        text = pattern.sub(f"{name}:{value:.12g}", text)
     for name in DERIVED:
         text = re.sub(rf"(?<![\w]){name}:[^\s,]+", f"{name}:-1", text)
     number = max(int(r[0]) for r in rows) + 1

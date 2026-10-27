@@ -1,7 +1,7 @@
 """Tools: analysis results, reduced on the server to what the agent asks.
 
 Every result tool takes the same query arguments (see QUERY_HELP) and runs them through
-one path: convert units -> threshold -> envelope -> extremes and top rows -> export.
+one path: convert units -> envelope -> threshold -> extremes and top rows -> export.
 """
 
 from pathlib import Path
@@ -11,7 +11,6 @@ from mcp.server import MCPServer
 
 from lira_sapr_mcp.adapters.base import norm_path, parse_numbers
 from lira_sapr_mcp.adapters.results import FRAGMENT_KIND, PUNCHING_KIND, force_kinds
-from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services import results as rs
 from lira_sapr_mcp.services.session import LiraSession
 from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors
@@ -19,14 +18,15 @@ from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors
 QUERY_HELP = """
 Query arguments (all result tools): components - which values (default all);
 sort_by - a component to order rows by, by absolute value unless by_abs=false;
-top - rows to return (default 20, null = up to 500); threshold - keep only rows whose
-sort_by value reaches it, in the units of the answer (by absolute value unless
-by_abs=false); envelope=true - per
+top - rows to return (at least 1, default 20, null = up to 500); envelope=true - per
 place (node, or element and section) the minimum and maximum of each component over
-load cases / combinations / shapes / limit states, with where each occurs;
-export_path - absolute .csv or .xlsx path: the whole table after threshold and envelope
-is written there (units in column headers) and the answer names the file. The answer
-always has the extremes of each component with their place, and total_rows.
+load cases / combinations / shapes / limit states, with where each occurs (sorting and
+threshold then use the one larger in magnitude); threshold - keep only rows whose
+sort_by value reaches it, in the units of the answer (by absolute value unless
+by_abs=false); export_path - absolute .csv or .xlsx path: the whole table after
+envelope and threshold is written there (units in column headers; an existing file is
+replaced) and the answer names the file. The answer always has the extremes of each
+component with their place, and total_rows.
 """
 
 # Reinforcement comes in fixed units, whatever LIRA's settings.
@@ -95,38 +95,16 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         per_family: bool,
     ) -> dict[str, Any]:
         """Reduce converted tables to the answer. units_of: per table, component -> unit."""
-        if q.threshold is not None and not q.sort_by:
-            raise LiraInputError("threshold needs sort_by: the component to compare")
-        answers: dict[str, Any] = {}
-        exported: dict[str, list[dict]] = {}
-        export_units: dict[str, str] = {}
-        for name, rows in tables.items():
-            units = units_of[name]
-            wanted = q.components or [c for c in units if any(c in r for r in rows)]
-            has_sort = bool(q.sort_by) and any(q.sort_by in r for r in rows)
-            if q.threshold is not None and has_sort:
-                rows = rs.threshold(rows, q.sort_by, q.threshold, q.by_abs)
-            keep: tuple[str, ...] = ()
-            if q.envelope:
-                rows = rs.envelope(rows, wanted)
-                keep = tuple(f"{c}_{e}" for c in wanted for e in ("min", "max", "min_at", "max_at"))
-            summary = rs.summarize(
-                rows,
-                wanted,
-                sort_by=q.sort_by if has_sort else None,
-                by_abs=q.by_abs,
-                top=q.top,
-                keep=keep,
-            )
-            if q.sort_by and not has_sort:
-                summary["note"] = f"no {q.sort_by} in {name}: rows are not sorted or filtered"
-            summary["units"] = {c: units[c] for c in wanted if c in units}
-            answers[name] = summary
-            exported[name] = rows
-            for c, unit in units.items():
-                export_units[c] = unit
-                if q.envelope:
-                    export_units[f"{c}_min"] = export_units[f"{c}_max"] = unit
+        answers, exported, export_units = rs.reduce_tables(
+            tables,
+            units_of,
+            components=q.components,
+            sort_by=q.sort_by,
+            by_abs=q.by_abs,
+            top=q.top,
+            at_least=q.threshold,
+            with_envelope=q.envelope,
+        )
         if per_family:
             result: dict[str, Any] = {"model": path, "families": answers}
             if not tables:
