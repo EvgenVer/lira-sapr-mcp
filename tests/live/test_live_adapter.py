@@ -19,6 +19,16 @@ def table_count(lira, adapter, ref):
 
 def test_capabilities_come_from_the_type_library(adapter):
     assert {"OpenDocument", "ImportFile", "StartAnalysis", "StartCmd"} <= adapter.capabilities
+    assert {"SetDeadWeightLoad", "Select"} <= adapter.capabilities  # document interface
+
+
+def test_lira_2024_r2_can_run_every_tool(adapter, tmp_path):
+    from fakes import fake_session
+    from lira_sapr_mcp.server import build_server
+    from lira_sapr_mcp.tools.common import unavailable_tools
+
+    build_server(fake_session(tmp_path)[0])  # registers the tools and what they need
+    assert unavailable_tools(adapter.capabilities) == []
     assert {"Nodes_Coordinates", "ElevationMarks", "LoadCases"} <= set(adapter.table_kinds)
 
 

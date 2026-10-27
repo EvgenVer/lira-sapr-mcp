@@ -9,7 +9,7 @@ from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services import loads as loads_service
 from lira_sapr_mcp.services.session import LiraSession
 from lira_sapr_mcp.services.textformat import Load
-from lira_sapr_mcp.tools.common import READ_ONLY, backup_before_change, lira_errors, plain
+from lira_sapr_mcp.tools.common import READ_ONLY, backup_before_change, lira_errors, needs, plain
 
 Cell = str | int | float | None
 # LIRA writes the text export in the background; the adapter waits up to 120 s for it.
@@ -75,6 +75,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors
+    @needs(session, "StartCmd")
     async def lira_read_loads(
         model: str | None = None, load_cases: list[int] | None = None
     ) -> dict[str, Any]:
@@ -93,6 +94,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool()
     @lira_errors
+    @needs(session, "StartCmd", "ImportFile")
     async def lira_set_loads(
         loads: list[dict[str, Any]],
         model: str | None = None,
@@ -136,6 +138,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool()
     @lira_errors
+    @needs(session, "ImportFile")
     async def lira_import_text_model(text: str, save_as: str) -> dict[str, Any]:
         """Create a model from LIRA's text input format and save it as save_as (.lir).
 
@@ -150,6 +153,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors
+    @needs(session, "StartCmd")
     async def lira_export_text(model: str | None = None) -> dict[str, Any]:
         """The whole model in LIRA's text input format (documents 0-8 and more)."""
         ref = await session.resolve(model)

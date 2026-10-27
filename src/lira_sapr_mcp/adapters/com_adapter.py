@@ -119,10 +119,7 @@ class ComLiraAdapter:
             if k.startswith(TABLE_PREFIX) and k[len(TABLE_PREFIX) :] not in NOT_TABLES
         }
         caps = {m for m in APP_METHODS if hasattr(app, m)}
-        doc_cls = type(app).__module__
-        module = __import__(doc_cls, fromlist=["ILiraDocument"])
-        doc_iface = getattr(module, "ILiraDocument", None)
-        caps |= {m for m in DOC_METHODS if doc_iface is not None and hasattr(doc_iface, m)}
+        caps |= set(DOC_METHODS) & _interface_methods(app, "ILiraDocument")
         self.capabilities = frozenset(caps)
         self._events = win32com.client.WithEvents(app, make_event_handler(self.analysis))
         log.info("connected to %s, capabilities: %s", self.install.progid, sorted(caps))
@@ -732,6 +729,24 @@ def return_parked_files(folder: Path, alive: Callable[[int], bool] = _process_al
         except OSError as exc:
             log.warning("Could not return the parked file %s: %s", parked, exc)
     return returned
+
+
+def _interface_methods(app: Any, interface: str) -> set[str]:
+    """Method names of an interface in LIRA's type library (the release's own API).
+
+    Read from the library itself: makepy's generated module for the application does not
+    hold the other interfaces.
+    """
+    try:
+        tlib, _ = app._oleobj_.GetTypeInfo().GetContainingTypeLib()
+        for i in range(tlib.GetTypeInfoCount()):
+            if tlib.GetDocumentation(i)[0] == interface:
+                info = tlib.GetTypeInfo(i)
+                count = info.GetTypeAttr().cFuncs
+                return {info.GetNames(info.GetFuncDesc(k).memid)[0] for k in range(count)}
+    except Exception as exc:  # pywintypes.com_error: an old or odd type library
+        log.warning("Could not read %s from LIRA's type library: %s", interface, exc)
+    return set()
 
 
 def _area(rect: tuple[int, int, int, int]) -> int:

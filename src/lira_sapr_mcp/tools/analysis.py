@@ -9,7 +9,7 @@ from mcp.types import ToolAnnotations
 
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors
+from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors, needs
 
 POLL_S = 0.5
 
@@ -27,6 +27,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool()
     @lira_errors
+    @needs(session, "StartAnalysis")
     async def lira_run_analysis(
         model: str | None = None, wait: bool = True, timeout_s: float | None = None
     ) -> dict[str, Any]:
@@ -64,6 +65,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool()
     @lira_errors
+    @needs(session, "StopAnalysis")
     async def lira_stop_analysis() -> dict[str, Any]:
         """Ask LIRA to stop the running analysis."""
         await session.run(session.adapter.stop_analysis)
@@ -71,6 +73,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True))
     @lira_errors
+    @needs(session, "DeleteResults")
     async def lira_delete_results(model: str | None = None) -> dict[str, Any]:
         """Delete the analysis results of a model (a .lir path, which may be closed, or an
         open model; default: the active one) from LIRA's work folder. The model file is

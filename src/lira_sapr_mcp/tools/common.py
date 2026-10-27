@@ -54,6 +54,7 @@ async def backup_before_change(session: Any, ref: str) -> str | None:
     return str(backup) if backup else None
 
 
+# --8<-- [start:needs]
 def needs(session: Any, *capabilities: str) -> Callable[[Callable[P, Awaitable[R]]], Any]:
     """Refuse a tool clearly when this LIRA release lacks an API function it needs."""
 
@@ -76,6 +77,9 @@ def needs(session: Any, *capabilities: str) -> Callable[[Callable[P, Awaitable[R
         return wrapper
 
     return wrap
+
+
+# --8<-- [end:needs]
 
 
 def unavailable_tools(capabilities: frozenset[str]) -> list[str]:

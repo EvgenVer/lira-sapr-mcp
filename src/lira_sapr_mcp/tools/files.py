@@ -12,7 +12,13 @@ from lira_sapr_mcp.adapters.base import MODEL_TYPES, norm_path
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services.models import model_summary
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors, needs, plain
+from lira_sapr_mcp.tools.common import (
+    READ_ONLY,
+    lira_errors,
+    needs,
+    plain,
+    unavailable_tools,
+)
 
 
 def register(mcp: MCPServer, session: LiraSession) -> None:
@@ -22,9 +28,14 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         """Installed LIRA versions, the one this server uses, and whether it is connected.
 
         When connected, also lists the API capabilities and input table names of that
-        LIRA release. Does not start LIRA.
+        LIRA release, and the tools it cannot run. Does not start LIRA.
         """
-        return session.status()
+        status = session.status()
+        if status["connected"]:
+            missing = unavailable_tools(session.adapter.capabilities)
+            if missing:
+                status["tools_this_lira_cannot_run"] = missing
+        return status
 
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors

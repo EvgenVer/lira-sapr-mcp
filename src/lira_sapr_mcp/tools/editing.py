@@ -12,7 +12,7 @@ from lira_sapr_mcp.adapters.base import parse_numbers
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services import operations as ops
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools.common import backup_before_change, lira_errors
+from lira_sapr_mcp.tools.common import backup_before_change, lira_errors, needs
 
 
 def register(mcp: MCPServer, session: LiraSession) -> None:
@@ -93,6 +93,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool()
     @lira_errors
+    @needs(session, "SetDeadWeightLoad", "Select")
     async def lira_self_weight(
         load_case: int,
         safety_factor: float = 1.0,
