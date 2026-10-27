@@ -126,6 +126,12 @@ class FakeAdapter:
         self.dialogs_shown.remove(dialog)
         return dialog
 
+    def model_picture(self, ref, view="isometric"):
+        from lira_sapr_mcp.adapters.picture import encode_png
+
+        self._get(ref)
+        return encode_png(2, 1, bytes([0, 0, 255, 255] + [255] * 4))  # red, white
+
     def delete_self_weight(self, ref):
         self._get(ref).pop("self_weight", None)
         return ""

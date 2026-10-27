@@ -91,3 +91,23 @@ async def test_restore_undoes_a_saved_change(mcp, workdir):
     assert added["backup"] and changed["nodes"] == 5
     assert restored["reopened"] and restored["restored_from"] == added["backup"]
     assert after["nodes"] == 4
+
+
+async def test_picture_of_the_frame(mcp, workdir):
+    import base64
+    import struct
+
+    path = str(workdir / "lmcp_picture.lir")
+    target = workdir / "frame.png"
+    async with Client(mcp) as client:
+        await ok(client, "lira_import_text_model", {"text": FRAME, "save_as": path})
+        res = await client.call_tool(
+            "lira_model_picture", {"view": "xoz", "save_path": str(target)}
+        )
+        await ok(client, "lira_close_model", {"model": path, "discard_changes": True})
+    assert not res.is_error, res.content
+    data = base64.b64decode(res.content[0].data)
+    assert data == target.read_bytes() and data[:8] == b"\x89PNG\r\n\x1a\n"
+    width, height = struct.unpack(">II", data[16:24])
+    # Cropped to the drawing: a frame 6 m wide and 3 m high is wider than high.
+    assert 50 < height < width

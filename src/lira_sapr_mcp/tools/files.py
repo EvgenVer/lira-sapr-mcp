@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver import Image
 from mcp.types import ToolAnnotations
 
 from lira_sapr_mcp.adapters.base import MODEL_TYPES, norm_path
@@ -140,6 +141,35 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         if doc is not None:
             await session.run(session.adapter.open_document, path)
         return {"model": path, "reopened": doc is not None, **restored}
+
+    # Image content, not structured output: the answer is the picture itself.
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False),
+        structured_output=False,
+    )
+    @lira_errors
+    async def lira_model_picture(
+        model: str | None = None, view: str = "isometric", save_path: str | None = None
+    ) -> list[Any]:
+        """A PNG picture of a model (default: the active one) as LIRA draws it: with its
+        loads, numbers and colours as set in LIRA's window. view: isometric, xoz, xoy or
+        current (LIRA's view is switched to it and fitted to the window). save_path:
+        also write the PNG there (absolute .png path). LIRA's window must not be minimized.
+        """
+        ref = await session.resolve(model)
+        data = await session.run(session.adapter.model_picture, ref, view)
+        note = f"{ref}, view {view}, {len(data)} bytes"
+        if save_path:
+            target = Path(save_path)
+            if not target.is_absolute() or target.suffix.lower() != ".png":
+                raise LiraInputError("save_path must be an absolute .png path")
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            except OSError as exc:
+                raise LiraInputError(f"Could not write {target}: {exc}") from exc
+            note += f", saved to {target}"
+        return [Image(data=data, format="png"), note]
 
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors

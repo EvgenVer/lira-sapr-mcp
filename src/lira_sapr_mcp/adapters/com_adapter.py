@@ -59,6 +59,9 @@ DOC_METHODS = ("SetGenerateCsvTables", "SetDeadWeightLoad", "SetSoilModel", "Sel
 # LiraDeadWeightLoadEnum: add to all or selected elements, delete all; LiraSelEnum elements.
 DEAD_ALL, DEAD_SELECTED, DEAD_DELETE = 32, 16, -1
 SEL_ELEMENTS = 0
+# LiraCmdIdEnum: projections for pictures, and "fit in window".
+VIEWS = {"current": 0, "isometric": 5249, "xoz": 5112, "xoy": 5113}
+FIT_IN_WINDOW = 5085
 
 
 def com_message(exc: BaseException) -> str:
@@ -395,6 +398,56 @@ class ComLiraAdapter:
             except LiraComError:
                 log.warning("Could not clear the selection after adding self weight")
 
+    def model_picture(self, ref: str, view: str = "isometric") -> bytes:
+        """A PNG of the model as LIRA's view window shows it, in the given projection
+        (or the current one) and fitted to the window."""
+        import win32gui
+
+        from lira_sapr_mcp.adapters.picture import capture_window, crop, encode_png
+
+        if view not in VIEWS:
+            raise LiraInputError(f"Unknown view {view!r}; use one of {sorted(VIEWS)}")
+        doc = self.find_document(ref)
+        self._call("Activate", doc.Activate)
+        for cmd in (VIEWS[view], FIT_IN_WINDOW):
+            if cmd:
+                self._call("StartCmd", self._app.StartCmd, cmd)
+                self._settle(0.6)  # LIRA redraws after handling its window messages
+        frame = self._view_window(doc)
+        if win32gui.IsIconic(win32gui.GetAncestor(frame, 2)):  # GA_ROOT
+            raise LiraInputError("LIRA's window is minimized: restore it to take a picture")
+        try:
+            return encode_png(*crop(*capture_window(frame)))
+        except ValueError as exc:
+            raise LiraComError(f"Could not take a picture of {doc.Title}: {exc}") from exc
+
+    def _view_window(self, doc: Any) -> int:
+        """The largest drawing window inside the document's window in LIRA's MDI area."""
+        import win32gui
+
+        from lira_sapr_mcp.adapters.dialogs import Win32Windows
+
+        names = {Path(str(doc.PathName)).name.lower(), str(doc.Title).lower()}
+        windows = Win32Windows()
+        for top in windows.top_level(Path(self.install.exe).name):
+            for mdi in windows.children(top):
+                if win32gui.GetClassName(mdi) != "MDIClient":
+                    continue
+                for frame in windows.children(mdi):
+                    text = win32gui.GetWindowText(frame).lower()
+                    if win32gui.GetParent(frame) == mdi and any(n and n in text for n in names):
+                        inner = windows.children(frame) or [frame]
+                        return max(inner, key=lambda h: _area(win32gui.GetClientRect(h)))
+        raise LiraComError(f"LIRA shows no window of {doc.Title}")
+
+    def _settle(self, seconds: float) -> None:
+        import pythoncom
+
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            pythoncom.PumpWaitingMessages()
+            time.sleep(0.05)
+
     def run_script(self, code: str, ref: str | None, timeout_s: float) -> dict[str, Any]:
         """Run the agent's Python code with LIRA's objects (see services/scripts.py)."""
         from lira_sapr_mcp.services.scripts import run_script
@@ -629,3 +682,7 @@ class ComLiraAdapter:
             stresses_per=n("geometry", u.Stresses2),
             temperature=n("temperature", u.Temperature),
         )
+
+
+def _area(rect: tuple[int, int, int, int]) -> int:
+    return (rect[2] - rect[0]) * (rect[3] - rect[1])
