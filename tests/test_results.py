@@ -194,3 +194,82 @@ def test_no_results_code_is_read_from_com_exception_info():
         excepinfo = (0, None, None, None, 0, NO_RESULTS_HRESULT)
 
     assert _scode(ComError()) == NO_RESULTS_HRESULT
+
+
+def cases_rows():
+    return [
+        {"element": 1, "case": c, "section": s, "N": n, "My": my}
+        for c, s, n, my in ((1, 1, -3.0, -2.0), (2, 1, 1.0, 5.0), (1, 2, -1.0, 0.5),
+                            (2, 2, -4.0, -0.5))
+    ]  # fmt: skip
+
+
+def test_threshold_keeps_rows_that_reach_it():
+    assert [r["My"] for r in rs.threshold(cases_rows(), "My", 2.0)] == [-2.0, 5.0]
+    assert [r["My"] for r in rs.threshold(cases_rows(), "My", 2.0, by_abs=False)] == [5.0]
+
+
+def test_envelope_per_element_and_section_over_cases():
+    env = rs.envelope(cases_rows(), ["N", "My"])
+    assert len(env) == 2
+    first = next(r for r in env if r["section"] == 1)
+    assert "case" not in first
+    assert (first["My_min"], first["My_max"], first["My"]) == (-2.0, 5.0, 5.0)
+    assert first["My_max_at"] == {"case": 2} and first["N_min_at"] == {"case": 1}
+    second = next(r for r in env if r["section"] == 2)
+    assert second["N"] == -4.0
+
+
+def test_export_csv_with_units_and_family_column(tmp_path):
+    import pandas as pd
+
+    tables = {"bar": cases_rows(), "plate": [{"element": 9, "case": 1, "Nx": 2.0}]}
+    out = rs.export(tables, {"N": "kN", "My": "kN*m", "Nx": "kPa"}, str(tmp_path / "f.csv"))
+    assert out == {"path": str(tmp_path / "f.csv"), "rows": 5}
+    df = pd.read_csv(tmp_path / "f.csv", encoding="utf-8-sig")
+    assert {"My, kN*m", "Nx, kPa", "family"} <= set(df.columns)
+    assert list(df["family"]) == ["bar"] * 4 + ["plate"]
+
+
+def test_export_xlsx_sheet_per_table_and_nested_cells(tmp_path):
+    import pandas as pd
+
+    env = rs.envelope(cases_rows(), ["My"])
+    path = tmp_path / "sub" / "env.xlsx"
+    rs.export({"bar": env}, {"My": "kN*m", "My_min": "kN*m"}, str(path))
+    sheets = pd.read_excel(path, sheet_name=None)
+    assert list(sheets) == ["bar"]
+    assert sheets["bar"]["My_max_at"][0] == "case=2"
+    assert "My_min, kN*m" in sheets["bar"].columns
+
+
+def test_export_needs_an_absolute_csv_or_xlsx_path(tmp_path):
+    with pytest.raises(LiraInputError, match="absolute"):
+        rs.export({"r": []}, {}, "out.csv")
+    with pytest.raises(LiraInputError, match=r"\.csv or \.xlsx"):
+        rs.export({"r": []}, {}, str(tmp_path / "out.txt"))
+
+
+@pytest.mark.anyio
+async def test_tools_take_threshold_envelope_and_export(tmp_path):
+    session, _ = fake_session(tmp_path)
+    model = str(tmp_path / "frame.lir")
+    target = tmp_path / "forces.xlsx"
+    async with Client(build_server(session)) as client:
+        env = await client.call_tool(
+            "lira_combination_displacements", {"model": model, "envelope": True}
+        )
+        big = await client.call_tool(
+            "lira_element_forces",
+            {"model": model, "sort_by": "My", "threshold": 25, "export_path": str(target)},
+        )
+        bad = await client.call_tool("lira_element_forces", {"model": model, "threshold": 1})
+    assert not env.is_error, env.content
+    (row,) = env.structured_content["rows"]
+    assert row["node"] == 2 and row["Z_min_at"] == {"combination": 2}
+    assert row["Z"] == row["Z_min"] and "combination" not in row
+    assert not big.is_error, big.content
+    bar = big.structured_content["families"]["bar"]
+    assert bar["total_rows"] == 1 and bar["rows"][0]["section"] == 2
+    assert big.structured_content["export"] == {"path": str(target), "rows": 2}
+    assert bad.is_error and "threshold needs sort_by" in bad.content[0].text

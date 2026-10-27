@@ -6,6 +6,7 @@ column axial force -30 t.
 """
 
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -167,6 +168,28 @@ async def test_plates_and_dynamic_shapes_of_example_04(mcp, workdir):
         )
         periods = await client.call_tool("lira_periods", {"model": path})
         rebar = await client.call_tool("lira_reinforcement", {"model": path, "elements": "109"})
+        plates = {"model": path, "families": ["plate"], "sort_by": "Mx", "top": 10}
+        started = time.monotonic()
+        every = await client.call_tool("lira_element_forces", plates)
+        read_s = time.monotonic() - started
+        export = workdir / "lmcp_ex04_plates.xlsx"
+        env = await client.call_tool(
+            "lira_element_forces",
+            plates | {"envelope": True, "threshold": 1.0, "export_path": str(export)},
+        )
+    assert not env.is_error, env.content
+    every_plate = every.structured_content["families"]["plate"]
+    env_plate = env.structured_content["families"]["plate"]
+    # The envelope keeps one row per plate, with the extremes over all cases and shapes.
+    assert (
+        env_plate["extremes"]["Mx"]["max"]["value"] == every_plate["extremes"]["Mx"]["max"]["value"]
+    )
+    top = env_plate["rows"][0]
+    assert "case" not in top and top["Mx_max_at"]["case"] in (1, 2, 3, 4)
+    assert abs(top["Mx"]) >= 1.0 and env_plate["total_rows"] < every_plate["total_rows"]
+    assert env.structured_content["export"]["rows"] == env_plate["total_rows"]
+    assert export.stat().st_size > 0
+    print(f"example 04: {every_plate['total_rows']} plate rows read in {read_s:.1f} s")
     assert not forces.is_error, forces.content
     (seismic,) = periods.structured_content["load_cases"]
     assert seismic["case"] == 4 and len(seismic["modes"]) == 13

@@ -1,5 +1,7 @@
-"""Turn raw result rows into small answers: units, selection, extremes, top N."""
+"""Turn raw result rows into small answers: units, selection, extremes, top N,
+envelopes, thresholds and full tables written to CSV or Excel."""
 
+from pathlib import Path
 from typing import Any
 
 from lira_sapr_mcp.errors import LiraInputError
@@ -76,8 +78,12 @@ def summarize(
     by_abs: bool = True,
     top: int | None = 20,
     max_rows: int = 500,
+    keep: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Extremes per component and the rows the agent asked for, never thousands of them."""
+    """Extremes per component and the rows the agent asked for, never thousands of them.
+
+    keep: more keys to show in rows (e.g. the envelope's ``<c>_min`` and ``<c>_max_at``).
+    """
     present = [c for c in components if any(c in r for r in rows)]
     unknown = sorted(set(components) - set(present))
     extremes = {}
@@ -100,7 +106,7 @@ def summarize(
         )
     limit = min(top, max_rows) if top else max_rows
     shown = [
-        {k: _round(v) for k, v in r.items() if k in present or k in LOCATION_KEYS}
+        {k: _round(v) for k, v in r.items() if k in present or k in LOCATION_KEYS or k in keep}
         for r in selected[:limit]
     ]
     result: dict[str, Any] = {
@@ -135,6 +141,87 @@ LOCATION_KEYS = (
     "load_cases",
     "with",
 )
+
+
+# Keys that tell one result of a place from another; an envelope runs over them.
+VARIANT_KEYS = ("case", "combination", "shape", "limit_state", "dcf", "criterion", "group",
+                "load_cases", "with")  # fmt: skip
+
+
+def threshold(rows: list[dict], component: str, value: float, by_abs: bool = True) -> list[dict]:
+    """Rows whose component reaches the threshold (by absolute value unless by_abs=False)."""
+    if by_abs:
+        return [r for r in rows if component in r and abs(r[component]) >= value]
+    return [r for r in rows if component in r and r[component] >= value]
+
+
+def envelope(rows: list[dict], components: list[str]) -> list[dict]:
+    """Per place (node, or element and section): minimum and maximum of each component over
+    load cases, combinations, shapes and limit states, with where each one occurs.
+
+    Rows get ``<c>_min``, ``<c>_max`` and ``<c>`` = the one of them larger in magnitude,
+    so they can be sorted and summarized like plain result rows.
+    """
+    groups: dict[tuple, dict[str, Any]] = {}
+    for row in rows:
+        place = tuple((k, row[k]) for k in LOCATION_KEYS if k in row and k not in VARIANT_KEYS)
+        env = groups.setdefault(place, dict(place))
+        variant = {k: row[k] for k in ("case", "combination", "shape", "limit_state", "dcf")
+                   if k in row}  # fmt: skip
+        for c in components:
+            if c not in row:
+                continue
+            v = row[c]
+            if f"{c}_min" not in env or v < env[f"{c}_min"]:
+                env[f"{c}_min"], env[f"{c}_min_at"] = v, variant
+            if f"{c}_max" not in env or v > env[f"{c}_max"]:
+                env[f"{c}_max"], env[f"{c}_max_at"] = v, variant
+    out = []
+    for env in groups.values():
+        for c in components:
+            if f"{c}_min" in env:
+                lo, hi = env[f"{c}_min"], env[f"{c}_max"]
+                env[c] = lo if abs(lo) > abs(hi) else hi
+        out.append(env)
+    return out
+
+
+def export(tables: dict[str, list[dict]], units: dict[str, str], path: str) -> dict[str, Any]:
+    """Write full tables to .csv (one file; a "family" column when several tables) or .xlsx
+    (a sheet per table). Column headers carry units, e.g. "My, kN*m"."""
+    import pandas as pd
+
+    target = Path(path)
+    if not target.is_absolute():
+        raise LiraInputError(f"export_path must be an absolute path, got {path!r}")
+    suffix = target.suffix.lower()
+    if suffix not in (".csv", ".xlsx"):
+        raise LiraInputError("export_path must end with .csv or .xlsx")
+
+    def frame(rows: list[dict]) -> Any:
+        df = pd.DataFrame([{k: _cell(v) for k, v in r.items()} for r in rows])
+        return df.rename(columns={c: f"{c}, {units[c]}" for c in df.columns if c in units})
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if suffix == ".csv":
+            frames = [frame(rows).assign(**({"family": name} if len(tables) > 1 else {}))
+                      for name, rows in tables.items()]  # fmt: skip
+            pd.concat(frames, ignore_index=True).to_csv(target, index=False, encoding="utf-8-sig")
+        else:
+            with pd.ExcelWriter(target, engine="openpyxl") as writer:
+                for name, rows in tables.items():
+                    frame(rows).to_excel(writer, sheet_name=name[:31] or "results", index=False)
+    except OSError as exc:
+        raise LiraInputError(f"Could not write {target}: {exc}") from exc
+    return {"path": str(target), "rows": sum(len(r) for r in tables.values())}
+
+
+def _cell(v: Any) -> Any:
+    # Nested values (where an envelope extreme occurs, design errors) as compact text.
+    if isinstance(v, dict):
+        return ", ".join(f"{k}={x}" for k, x in v.items())
+    return v
 
 
 def _where(row: dict) -> dict:
