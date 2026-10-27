@@ -16,6 +16,7 @@ def app_data_dir() -> Path:
     return Path(base) / "lira-sapr-mcp"
 
 
+# --8<-- [start:settings]
 @dataclass(frozen=True)
 class Settings:
     # LIRA release year to use, e.g. 2024; None picks the newest supported installation.
@@ -27,6 +28,7 @@ class Settings:
     # Folder next to a model where backups are written before the first change.
     backup_dir_name: str = "lira-mcp-backups"
     log_file: Path = app_data_dir() / "server.log"
+    # --8<-- [end:settings]
 
 
 def default_config_path() -> Path:

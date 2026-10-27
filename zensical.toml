@@ -10,6 +10,7 @@ nav = [
   "PRODUCT.md",
   "ARCHITECTURE.md",
   { "Устройство" = [ "components/server.md", "flows/main-scenario.md" ] },
+  "operations.md",
   { "Решения" = [ "decisions/0001-architecture.md", "decisions/0002-python-stack.md" ] },
   { "Исследования" = [ "research/lira-api.md" ] },
   "TASKS.md",

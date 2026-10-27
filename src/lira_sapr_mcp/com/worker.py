@@ -128,6 +128,7 @@ class ComWorker:
                     continue
                 if job is _STOP:
                     return
+                # --8<-- [start:run_job]
                 fut, fn, args, kwargs = job
                 if not fut.set_running_or_notify_cancel():
                     continue
@@ -138,6 +139,7 @@ class ComWorker:
                     log.debug("job %s failed", self._busy_with, exc_info=exc)
                     _drop_frame_locals(exc)
                     fut.set_exception(exc)
+                # --8<-- [end:run_job]
                 finally:
                     self._busy_with = None
                 self._pump()

@@ -31,8 +31,9 @@ packages = ["src/lira_sapr_mcp"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-# Throwaway experiment scripts against live LIRA; kept for reference, not product code.
-extend-exclude = ["spikes"]
+# spikes: throwaway experiments against live LIRA. docs: code blocks there embed source
+# files by snippet markers, which the formatter would mangle.
+extend-exclude = ["spikes", "docs"]
 force-exclude = true
 
 [tool.ruff.lint]
