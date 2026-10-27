@@ -1,0 +1,20 @@
+# Runs the project's own tools from .venv so versions match `uv sync`.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format --check
+        entry: uv run ruff format --check
+        language: system
+        types: [python]
+      - id: pytest
+        name: pytest (no LIRA)
+        entry: uv run pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true

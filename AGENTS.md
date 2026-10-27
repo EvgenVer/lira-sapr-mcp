@@ -108,5 +108,15 @@ If the owner corrects the same kind of mistake twice, propose a rule for this fi
 
 ## Project commands
 
-<!-- Filled in by task T1 "Project skeleton" once the stack is approved: one exact
-     command each to install, run, test, lint and format, and preview the docs. -->
+- Install: `uv sync` (creates `.venv`; then `uv run pre-commit install` once per clone)
+- Run: `uv run lira-sapr-mcp` (MCP server over stdio)
+- Test (no LIRA needed): `uv run pytest`
+- Test on live LIRA (starts LiraSapr.exe, uses only models under `tests/`): `uv run pytest -m lira`
+- Lint: `uv run ruff check`
+- Format: `uv run ruff format`
+- Docs check: `uv run zensical build --strict`
+- Docs preview: `uv run zensical serve -a localhost:8010` (port 8000 is taken on the
+  owner's machine)
+
+The pre-commit hook runs lint, the format check and the tests without LIRA. Run the
+live-LIRA tests before closing any task that talks to LIRA.
