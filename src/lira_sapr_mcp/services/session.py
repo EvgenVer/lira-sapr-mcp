@@ -33,6 +33,9 @@ class LiraSession:
         self._make_adapter = make_adapter
         self._installs: list[LiraInstall] | None = None
         self._adapter: Any = None
+        # Models analysed in this session, by lower-cased path: LIRA keys results by the
+        # model name only, so same-named models from different folders share results.
+        self.analysed: dict[str, str] = {}
 
     @property
     def installs(self) -> list[LiraInstall]:

@@ -7,7 +7,7 @@ from mcp.server import MCPServer
 
 from lira_sapr_mcp import __version__
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools import files, tables
+from lira_sapr_mcp.tools import analysis, files, tables
 
 INSTRUCTIONS = """\
 Drives LIRA-SAPR (LIRA-FEM) 2024 R2+ on this computer through its COM API.
@@ -30,4 +30,5 @@ def build_server(session: LiraSession) -> MCPServer:
     mcp = MCPServer("lira-sapr", version=__version__, instructions=INSTRUCTIONS, lifespan=lifespan)
     files.register(mcp, session)
     tables.register(mcp, session)
+    analysis.register(mcp, session)
     return mcp

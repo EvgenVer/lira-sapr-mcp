@@ -14,6 +14,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from lira_sapr_mcp.adapters.analysis import (
+    AnalysisState,
+    make_event_handler,
+    protocol_path,
+    read_protocol,
+    summarize_protocol,
+)
 from lira_sapr_mcp.adapters.base import (
     UNIT_NAMES,
     DocInfo,
@@ -72,6 +79,8 @@ class ComLiraAdapter:
         # Documents whose "modified" flag was set only by our own reads: LIRA marks a
         # document modified when a scratch input table is created and removed in it.
         self._dirty_by_reads: set[str] = set()
+        self.analysis = AnalysisState()
+        self._events: Any = None
 
     # --- connection -----------------------------------------------------------------
 
@@ -108,6 +117,7 @@ class ComLiraAdapter:
         doc_iface = getattr(module, "ILiraDocument", None)
         caps |= {m for m in DOC_METHODS if doc_iface is not None and hasattr(doc_iface, m)}
         self.capabilities = frozenset(caps)
+        self._events = win32com.client.WithEvents(app, make_event_handler(self.analysis))
         log.info("connected to %s, capabilities: %s", self.install.progid, sorted(caps))
 
     def disconnect(self) -> None:
@@ -117,6 +127,7 @@ class ComLiraAdapter:
         """
         import gc
 
+        self._events = None
         self._app = None
         self._c = None
         gc.collect()
@@ -385,6 +396,46 @@ class ComLiraAdapter:
             except UnicodeDecodeError:
                 continue
         raise LiraComError(f"Cannot decode LIRA's text export {target}")
+
+    # --- analysis -------------------------------------------------------------------
+
+    def start_analysis(self, ref: str) -> dict:
+        """Start analysing a saved model; returns at once (progress comes as events)."""
+        info = self.document_info(ref)
+        if not info.saved:
+            raise LiraInputError("Save the model to a .lir file before the analysis")
+        if info.modified:
+            raise LiraInputError(
+                f"{info.title} has unsaved changes; LIRA analyses the file on disk: save first"
+            )
+        if self.analysis.status in ("running", "needs_user"):
+            raise LiraInputError(f"An analysis of {self.analysis.model} is still running")
+        self.analysis.start(info.path)
+        ok = self._call("StartAnalysis", self._app.StartAnalysis, info.path)
+        if not ok:
+            self.analysis.on_finished(1)
+            work = self.directories().get("WorkDirectory", "")
+            log_text = read_protocol(Path(work) / "PackageAnalysisLog.TXT") or ""
+            raise LiraComError(f"LIRA refused to start the analysis. {log_text.strip()}")
+        return self.analysis.as_dict()
+
+    def analysis_status(self) -> dict:
+        status = self.analysis.as_dict()
+        if self.analysis.done and self.analysis.model:
+            text = self.protocol(self.analysis.model)
+            if text is not None:
+                status["protocol"] = summarize_protocol(text)
+            status["model_closed_by_lira"] = not any(
+                norm_path(str(d.PathName)) == norm_path(self.analysis.model) for d in self._docs()
+            )
+        return status
+
+    def stop_analysis(self) -> None:
+        self._call("StopAnalysis", self._app.StopAnalysis)
+
+    def protocol(self, model_path: str) -> str | None:
+        work = self.directories().get("WorkDirectory")
+        return read_protocol(protocol_path(work, model_path)) if work else None
 
     # --- units ----------------------------------------------------------------------
 
