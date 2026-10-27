@@ -1,0 +1,19 @@
+{
+  "extraKnownMarketplaces": {
+    "agents-toolkit": {
+      "source": { "source": "github", "repo": "EvgenVer/Agents-tollkit" }
+    }
+  },
+  "enabledPlugins": {
+    "studio@agents-toolkit": true
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./**/.env)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.gnupg/**)"
+    ]
+  }
+}

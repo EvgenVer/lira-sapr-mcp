@@ -1,0 +1,9 @@
+# Codex settings for this project; Codex applies them once you trust the project.
+# The agent edits files and runs commands inside the project without asking, and the
+# operating-system sandbox stops writes outside the project folder.
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[sandbox_workspace_write]
+# Package installs and documentation lookups need the network.
+network_access = true
