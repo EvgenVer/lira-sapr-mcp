@@ -2,12 +2,14 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.resources import files
 
 from mcp.server import MCPServer
 
 from lira_sapr_mcp import __version__
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools import analysis, files, results, tables
+from lira_sapr_mcp.tools import analysis, results, tables
+from lira_sapr_mcp.tools import files as file_tools
 
 INSTRUCTIONS = """\
 Drives LIRA-SAPR (LIRA-FEM) 2024 R2+ on this computer through its COM API.
@@ -17,7 +19,10 @@ Calls are executed one at a time by LIRA. Input tables use LIRA's current units,
 by lira_model_summary. A model argument is a .lir path or a model title; when omitted, the
 model active in LIRA is used. Files are backed up before the server first overwrites them.
 Results tools return extremes and the top rows only, converted to LIRA's current units.
+Table columns, FE type codes and the text format: resource lira://reference/tables.
 """
+
+TABLES_REFERENCE = "lira://reference/tables"
 
 
 def build_server(session: LiraSession) -> MCPServer:
@@ -29,8 +34,19 @@ def build_server(session: LiraSession) -> MCPServer:
             session.close()
 
     mcp = MCPServer("lira-sapr", version=__version__, instructions=INSTRUCTIONS, lifespan=lifespan)
-    files.register(mcp, session)
+    file_tools.register(mcp, session)
     tables.register(mcp, session)
     analysis.register(mcp, session)
     results.register(mcp, session)
+
+    @mcp.resource(
+        TABLES_REFERENCE,
+        title="LIRA input tables, FE types and text format",
+        description="Columns of LIRA's input tables, FE type codes, model types and the "
+        "text input format, with what is verified and what is only observed.",
+        mime_type="text/markdown",
+    )
+    def tables_reference() -> str:
+        return files("lira_sapr_mcp.reference").joinpath("tables.md").read_text(encoding="utf-8")
+
     return mcp

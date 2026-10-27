@@ -22,6 +22,7 @@ class FakeAdapter:
         self.active: str | None = None
         self.analysis = "idle"
         self.analysed: str | None = None
+        self.deleted: set[str] = set()
 
     def connect(self) -> None:
         self.connected = True
@@ -109,6 +110,15 @@ class FakeAdapter:
 
     def stop_analysis(self):
         self.analysis = "stopped"
+
+    # Models whose names start with "frame" have results of 2 nodes and 3 elements.
+    def results_info(self, model_path):
+        if not Path(model_path).stem.startswith("frame") or model_path in self.deleted:
+            return {"present": False}
+        return {"present": True, "nodes": 2, "elements": 3, "written": "2026-10-27T10:00:00"}
+
+    def delete_results(self, model_path):
+        self.deleted.add(model_path)
 
     def protocol(self, model_path):
         return "Расчет успешно завершен\n" if model_path == self.analysed else None

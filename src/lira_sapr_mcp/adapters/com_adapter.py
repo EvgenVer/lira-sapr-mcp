@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -453,6 +454,34 @@ class ComLiraAdapter:
 
     def stop_analysis(self) -> None:
         self._call("StopAnalysis", self._app.StopAnalysis)
+
+    def results_info(self, model_path: str) -> dict[str, Any]:
+        """Whether LIRA keeps analysis results under this model's name, their size and time.
+
+        LIRA keeps them in its work folder by model name only, so they may belong to an
+        older version of the model or to another model of the same name. The model file's
+        time cannot tell: the server saves models it only read (see _save_possible_edits).
+        """
+        main = self.results.main_data(model_path)
+        if main is None:
+            return {"present": False}
+        info: dict[str, Any] = {"present": True, **main}
+        work = self.directories().get("WorkDirectory")
+        stem = Path(model_path).stem
+        marker = Path(work) / f"{stem}#00.{stem}" if work else None
+        if marker and marker.exists():
+            written = datetime.fromtimestamp(marker.stat().st_mtime)
+            info["written"] = written.isoformat(timespec="seconds")
+        return info
+
+    def delete_results(self, model_path: str) -> None:
+        if (
+            self.analysis.status in ("running", "needs_user")
+            and self.analysis.model
+            and (norm_path(self.analysis.model) == norm_path(model_path))
+        ):
+            raise LiraInputError(f"The analysis of {model_path} is still running")
+        self._call("DeleteResults", self._app.DeleteResults, model_path)
 
     def protocol(self, model_path: str) -> str | None:
         work = self.directories().get("WorkDirectory")

@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.types import ToolAnnotations
 
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services.session import LiraSession
@@ -62,6 +63,24 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         """Ask LIRA to stop the running analysis."""
         await session.run(session.adapter.stop_analysis)
         return await wait_for_end(30)
+
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=True, idempotentHint=True))
+    @lira_errors
+    async def lira_delete_results(model: str | None = None) -> dict[str, Any]:
+        """Delete the analysis results of a model (a .lir path, which may be closed, or an
+        open model; default: the active one) from LIRA's work folder. The model file is
+        not changed; lira_run_analysis creates the results again. LIRA keeps results by
+        model name, so this also deletes results of a same-named model from another folder.
+        """
+        path = model if model and model.lower().endswith(".lir") else None
+        path = path or await session.resolve(model)
+        if not path.lower().endswith(".lir"):
+            raise LiraInputError(f"{path} is not saved, so it has no results")
+        before = await session.run(session.adapter.results_info, path)
+        if before["present"]:
+            await session.run(session.adapter.delete_results, path)
+        session.analysed.pop(path.lower(), None)
+        return {"model": path, "deleted": before["present"], "results_before": before}
 
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors

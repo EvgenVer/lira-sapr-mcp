@@ -100,8 +100,11 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
     @lira_errors
     async def lira_model_summary(model: str | None = None) -> dict[str, Any]:
         """Overview of a model (default: the active one): model type, LIRA's current input
-        units, number of nodes and elements, elements per finite element type, stiffnesses
-        and load cases. Start here before reading or changing a model.
+        units, number of nodes and elements, elements per finite element type, stiffnesses,
+        load cases and "results": whether LIRA keeps analysis results for it, when they
+        were written, and a note when they belong to another version or same-named model.
+        Start here before reading or changing a model. Table formats and FE type codes:
+        resource lira://reference/tables.
         """
         ref = await session.resolve(model)
         return await session.run(model_summary, session.adapter, ref)

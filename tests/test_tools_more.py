@@ -89,3 +89,43 @@ async def test_list_tools_answer_without_a_model(tmp_path):
         tables = await call(client, "lira_list_input_tables", {})
     assert not models.is_error and not tables.is_error
     assert "Nodes_Coordinates" in tables.structured_content["result"]
+
+
+async def test_summary_reports_results_and_delete_removes_them(tmp_path):
+    session, _ = fake_session(tmp_path)
+    model = tmp_path / "frame.lir"
+    model.write_bytes(b"lir")
+    async with Client(build_server(session)) as client:
+        await call(client, "lira_open_model", {"path": str(model)})
+        before = await call(client, "lira_model_summary", {})
+        deleted = await call(client, "lira_delete_results", {"model": str(model)})
+        again = await call(client, "lira_delete_results", {"model": str(model)})
+        after = await call(client, "lira_model_summary", {})
+        await call(client, "lira_create_model", {"title": "new"})
+        unsaved = await call(client, "lira_model_summary", {})
+    results = before.structured_content["results"]
+    assert results["present"] and results["written"].startswith("2026")
+    # The fake results have 2 nodes and 3 elements; the open model has none.
+    assert "another version of the model" in results["note"]
+    assert deleted.structured_content["deleted"] is True
+    assert again.structured_content["deleted"] is False
+    assert after.structured_content["results"] == {"present": False}
+    assert unsaved.structured_content["results"]["present"] is False
+
+
+async def test_delete_results_needs_a_saved_model(tmp_path):
+    session, _ = fake_session(tmp_path)
+    async with Client(build_server(session)) as client:
+        await call(client, "lira_create_model", {"title": "new"})
+        res = await call(client, "lira_delete_results", {})
+    assert res.is_error and "not saved" in res.content[0].text
+
+
+async def test_tables_reference_is_a_resource(tmp_path):
+    session, _ = fake_session(tmp_path)
+    async with Client(build_server(session)) as client:
+        listed = await client.list_resources()
+        read = await client.read_resource("lira://reference/tables")
+    assert [str(r.uri) for r in listed.resources] == ["lira://reference/tables"]
+    text = read.contents[0].text
+    assert "Nodes_Coordinates" in text and "universal space bar" in text

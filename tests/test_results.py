@@ -273,3 +273,19 @@ async def test_tools_take_threshold_envelope_and_export(tmp_path):
     assert bar["total_rows"] == 1 and bar["rows"][0]["section"] == 2
     assert big.structured_content["export"] == {"path": str(target), "rows": 2}
     assert bad.is_error and "threshold needs sort_by" in bad.content[0].text
+
+
+class ResultsOnly:
+    def __init__(self, info):
+        self.info = info
+
+    def results_info(self, path):
+        return dict(self.info)
+
+
+def test_results_summary_notes_foreign_results():
+    from lira_sapr_mcp.services.models import results_summary
+
+    fresh = {"present": True, "nodes": 2, "elements": 1}
+    assert "note" not in results_summary(ResultsOnly(fresh), "m.lir", 2, 1)
+    assert "same name" in results_summary(ResultsOnly(fresh), "m.lir", 5, 1)["note"]

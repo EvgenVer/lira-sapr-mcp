@@ -211,3 +211,39 @@ async def test_plates_and_dynamic_shapes_of_example_04(mcp, workdir):
     assert plate["extremes"]["Mx"]["max"]["at"]["case"] == 4
     d = moved.structured_content
     assert sorted(r["shape"] for r in d["rows"]) == [1, 5, 11]
+
+
+EXAMPLE_02 = (
+    Path(r"C:\Users\Public\Documents\LIRA SAPR\LIRA SAPR 2024\Manual\RU")
+    / "02_плита ЖБ"
+    / "02_плита ЖБ.lir"
+)
+
+
+async def test_summary_and_results_of_example_02(mcp, workdir):
+    """Acceptance example 2: the summary of a ready model, as LIRA shows it: a slab of
+    91 nodes, 72 plate elements (FE type 11) and 3 load cases."""
+    if not EXAMPLE_02.exists():
+        pytest.skip("LIRA example models are not installed")
+    path = str(workdir / "lmcp_ex02.lir")
+    shutil.copy(EXAMPLE_02, path)
+    async with Client(mcp) as client:
+        await client.call_tool("lira_delete_results", {"model": path})
+        await client.call_tool("lira_open_model", {"path": path})
+        before = await client.call_tool("lira_model_summary", {})
+        status = await analyse_open(client, path)
+        assert status["status"] == "finished", status
+        await client.call_tool("lira_open_model", {"path": path})
+        after = await client.call_tool("lira_model_summary", {})
+        await client.call_tool("lira_close_model", {"model": path, "discard_changes": True})
+        deleted = await client.call_tool("lira_delete_results", {"model": path})
+        forces = await client.call_tool("lira_element_forces", {"model": path})
+    s = before.structured_content
+    assert (s["nodes"], s["elements"], len(s["load_cases"])) == (91, 72, 3)
+    assert s["elements_by_fe_type"] == {"11": 72}
+    assert s["results"] == {"present": False}
+    results = after.structured_content["results"]
+    assert results["present"] and (results["nodes"], results["elements"]) == (91, 72)
+    assert "note" not in results and results["written"]
+    assert deleted.structured_content["deleted"] is True
+    assert forces.is_error and "No analysis results" in forces.content[0].text

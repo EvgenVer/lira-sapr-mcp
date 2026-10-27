@@ -234,6 +234,17 @@ class ResultsReader:
                         rows.append(row)
         return rows
 
+    def main_data(self, model_path: str) -> dict[str, int] | None:
+        """Node and element counts of the results kept under this model's name, or None
+        when there are no results."""
+        try:
+            main = self._query(
+                model_path, "kLiraRequest_MainData", "ILiraMainDataRequest", "MainData"
+            )
+        except LiraInputError:
+            return None
+        return {"nodes": int(main.GetNodeCount()), "elements": int(main.GetElementCount())}
+
     def _elements(self, model_path: str, elements: list[int] | None) -> list[int]:
         if elements:
             return elements

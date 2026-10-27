@@ -32,7 +32,8 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         Typical: Nodes_Coordinates (number, X, Y, Z), Elements_TypeAndNodes (number,
         FE type, "node, node, ..."), Nodes_Restraints (node + 6 flags X Y Z UX UY UZ),
         Stiffnesses, Elements_Stiffnesses (element, stiffness number), LoadCases, DCL.
-        Read a table first to see its columns and value format.
+        Columns of every table, FE type codes and the text format: resource
+        lira://reference/tables. Read a table first to see its value format.
         """
         await session.run(session.adapter.connect)
         return sorted(session.adapter.table_kinds)
