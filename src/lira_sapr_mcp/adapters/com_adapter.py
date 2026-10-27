@@ -154,6 +154,16 @@ class ComLiraAdapter:
         open_now = ", ".join(str(d.PathName) for d in docs) or "none"
         raise LiraInputError(f"No open LIRA document matches {ref!r}. Open documents: {open_now}")
 
+    def document_info(self, ref: str | None = None) -> DocInfo:
+        """Plain data about ``ref`` (path or title), or about the active document."""
+        self.connect()
+        if ref:
+            return self._info(self.find_document(ref))
+        active = self._app.ActiveDocument
+        if active is None:
+            raise LiraInputError("No model is open in LIRA: open or create one first")
+        return self._info(active)
+
     def open_document(self, path: str) -> tuple[DocInfo, str]:
         self.connect()
         p = Path(path)
