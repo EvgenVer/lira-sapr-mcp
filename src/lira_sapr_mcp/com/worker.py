@@ -10,6 +10,7 @@ import asyncio
 import logging
 import queue
 import threading
+import time
 import traceback
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -70,11 +71,20 @@ class ComWorker:
         self._jobs: queue.Queue[Any] = queue.Queue()
         self._thread: threading.Thread | None = None
         self._busy_with: str | None = None
+        self._started_at = 0.0
+        # A job still running after its caller gave up, and how the last such job ended.
+        self._overdue: Future | None = None
+        self.last_overdue: dict[str, Any] | None = None
 
     @property
     def busy_with(self) -> str | None:
         """Name of the job running now, or None when idle."""
         return self._busy_with
+
+    @property
+    def overdue(self) -> str | None:
+        """Name of a job that ran past its time-out and is still running, if any."""
+        return self._busy_with if self._overdue is not None else None
 
     def start(self) -> None:
         if self._thread is None:
@@ -95,27 +105,58 @@ class ComWorker:
 
     def call(self, fn: Callable[..., Any], *args: Any, timeout: float, **kwargs: Any) -> Any:
         """Run ``fn`` on the worker and wait for it from any other thread."""
+        self._refuse_while_overdue(fn)
         fut = self.submit(fn, *args, **kwargs)
         try:
             return fut.result(timeout)
         except TimeoutError:
-            fut.cancel()
-            raise self._timeout_error(fn, timeout) from None
+            raise self._timed_out(fut, fn, timeout) from None
 
     async def run(self, fn: Callable[..., Any], *args: Any, timeout: float, **kwargs: Any) -> Any:
         """Run ``fn`` on the worker and await it from the event loop."""
+        self._refuse_while_overdue(fn)
         fut = self.submit(fn, *args, **kwargs)
         try:
-            return await asyncio.wait_for(asyncio.wrap_future(fut), timeout)
+            # shield: a time-out must not cancel the job here; _timed_out decides.
+            return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(fut)), timeout)
         except TimeoutError:
-            raise self._timeout_error(fn, timeout) from None
+            raise self._timed_out(fut, fn, timeout) from None
 
-    def _timeout_error(self, fn: Callable[..., Any], timeout: float) -> LiraTimeoutError:
-        running = self._busy_with or "nothing"
+    def _refuse_while_overdue(self, fn: Callable[..., Any]) -> None:
+        """Answer at once while a timed-out job still holds LIRA: queued calls would only
+        time out behind it."""
+        if self._overdue is not None and not self._overdue.done():
+            busy = round(time.monotonic() - self._started_at)
+            raise LiraTimeoutError(
+                f"LIRA is still busy with {self._busy_with} ({busy} s, past its time-out), "
+                f"so {getattr(fn, '__name__', fn)} was not run. Check lira_status or "
+                "lira_dialogs; LIRA may be waiting in a dialog."
+            )
+
+    def _timed_out(self, fut: Future, fn: Callable[..., Any], timeout: float) -> LiraTimeoutError:
+        name = getattr(fn, "__name__", fn)
+        if fut.cancel():  # still queued behind another job: it never runs
+            return LiraTimeoutError(
+                f"LIRA did not start {name} within {timeout:.0f} s: it is busy with "
+                f"{self._busy_with or 'another call'}. The call was not run."
+            )
+        self._overdue = fut
         return LiraTimeoutError(
-            f"LIRA did not answer within {timeout:.0f} s ({getattr(fn, '__name__', fn)}; "
-            f"running now: {running}). A modal dialog in LIRA may be waiting for the user."
+            f"LIRA did not finish {name} within {timeout:.0f} s. It is still running and may "
+            "still complete and change the model: lira_status shows when it ends and whether "
+            "it succeeded; do not repeat it before. A modal dialog in LIRA may be waiting "
+            "for the user."
         )
+
+    def _record_overdue(self, error: BaseException | None) -> None:
+        self.last_overdue = {
+            "job": self._busy_with,
+            "seconds": round(time.monotonic() - self._started_at, 1),
+            "ok": error is None,
+            "error": None if error is None else str(error),
+        }
+        log.warning("Job %s finished after its time-out: %s", self._busy_with, self.last_overdue)
+        self._overdue = None
 
     def _loop(self) -> None:
         self._init()
@@ -133,14 +174,19 @@ class ComWorker:
                 if not fut.set_running_or_notify_cancel():
                     continue
                 self._busy_with = getattr(fn, "__name__", repr(fn))
+                self._started_at = time.monotonic()
+                error: BaseException | None = None
                 try:
                     fut.set_result(fn(*args, **kwargs))
                 except BaseException as exc:
                     log.debug("job %s failed", self._busy_with, exc_info=exc)
                     _drop_frame_locals(exc)
+                    error = exc
                     fut.set_exception(exc)
                 # --8<-- [end:run_job]
                 finally:
+                    if self._overdue is fut:
+                        self._record_overdue(error)
                     self._busy_with = None
                 self._pump()
         finally:

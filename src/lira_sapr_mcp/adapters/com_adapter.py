@@ -326,13 +326,21 @@ class ComLiraAdapter:
         return self._cast(item, "ILiraTable")
 
     def _drop_table(self, doc: Any, table: Any) -> None:
-        """Input tables created through the API stay in the document; remove ours."""
-        mark = str(table.Name)
-        tables = doc.AllTables
-        for i in range(tables.ItemCount - 1, -1, -1):
-            if str(tables.Item(i).Name) == mark:
-                tables.Delete(i)
-                return
+        """Input tables created through the API stay in the document; remove ours.
+
+        Called from ``finally``: a failure here is logged, never raised, so it cannot hide
+        the error of the table operation itself.
+        """
+        mark = ""
+        try:
+            mark = str(table.Name)
+            tables = doc.AllTables
+            for i in range(tables.ItemCount - 1, -1, -1):
+                if str(tables.Item(i).Name) == mark:
+                    tables.Delete(i)
+                    return
+        except Exception as exc:
+            log.warning("Could not remove scratch table %r: %s", mark, com_message(exc))
 
     def read_table(self, ref: str, name: str, numbers: list[int] | None = None) -> list[list]:
         doc = self.find_document(ref)

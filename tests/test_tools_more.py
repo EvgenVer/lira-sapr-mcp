@@ -129,3 +129,20 @@ async def test_tables_reference_is_a_resource(tmp_path):
     assert [str(r.uri) for r in listed.resources] == ["lira://reference/tables"]
     text = read.contents[0].text
     assert "Nodes_Coordinates" in text and "universal space bar" in text
+
+
+async def test_closing_the_session_releases_lira_and_the_worker(tmp_path):
+    session, adapter = fake_session(tmp_path)
+    async with Client(build_server(session)) as client:
+        await call(client, "lira_list_models", {})
+    assert adapter.connected is False  # the server's lifespan closed the session
+    assert session.worker._thread is None
+
+
+async def test_status_tells_about_a_call_that_finished_after_its_time_out(tmp_path):
+    session, _ = fake_session(tmp_path)
+    session.worker.last_overdue = {"job": "set_loads", "seconds": 75.0, "ok": True,
+                                   "error": None}  # fmt: skip
+    async with Client(build_server(session)) as client:
+        status = await call(client, "lira_status", {})
+    assert status.structured_content["last_call_finished_after_time_out"]["job"] == "set_loads"

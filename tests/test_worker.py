@@ -73,3 +73,63 @@ def test_pump_runs_while_idle():
         assert pumped.wait(2)
     finally:
         w.stop()
+
+
+def test_a_queued_call_that_times_out_is_never_run(worker):
+    release = threading.Event()
+    ran = []
+    worker.submit(lambda: release.wait(5))
+    time.sleep(0.05)
+
+    async def main():
+        await worker.run(lambda: ran.append(1), timeout=0.1)
+
+    with pytest.raises(LiraTimeoutError, match="was not run"):
+        asyncio.run(main())
+    release.set()
+    worker.call(lambda: None, timeout=5)
+    assert ran == []
+
+
+def test_an_overdue_job_blocks_new_calls_and_reports_how_it_ended(worker):
+    release = threading.Event()
+
+    def set_loads():
+        release.wait(5)
+        return "saved"
+
+    async def first():
+        await worker.run(set_loads, timeout=0.1)
+
+    with pytest.raises(LiraTimeoutError, match="still running and may still complete"):
+        asyncio.run(first())
+    assert worker.overdue == "set_loads"
+    # Other calls are refused at once instead of queueing behind it.
+    started = time.monotonic()
+    with pytest.raises(LiraTimeoutError, match="still busy with set_loads"):
+        worker.call(lambda: None, timeout=5)
+    assert time.monotonic() - started < 1
+    release.set()
+    for _ in range(100):
+        if worker.overdue is None:
+            break
+        time.sleep(0.02)
+    assert worker.last_overdue["job"] == "set_loads" and worker.last_overdue["ok"]
+    assert worker.call(lambda: "free", timeout=5) == "free"
+
+
+def test_an_overdue_job_that_fails_reports_its_error(worker):
+    release = threading.Event()
+
+    def save():
+        release.wait(5)
+        raise RuntimeError("disk full")
+
+    with pytest.raises(LiraTimeoutError):
+        worker.call(save, timeout=0.1)
+    release.set()
+    for _ in range(100):
+        if worker.last_overdue:
+            break
+        time.sleep(0.02)
+    assert worker.last_overdue["ok"] is False and "disk full" in worker.last_overdue["error"]

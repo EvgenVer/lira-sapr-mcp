@@ -118,6 +118,10 @@ class LiraSession:
         else:
             result["connected"] = False
         result["busy_with"] = self.worker.busy_with
+        if self.worker.overdue:
+            result["still_running_after_time_out"] = self.worker.overdue
+        if self.worker.last_overdue:
+            result["last_call_finished_after_time_out"] = self.worker.last_overdue
         return result
 
     def close(self) -> None:
