@@ -8,7 +8,7 @@ from mcp.server import MCPServer
 
 from lira_sapr_mcp import __version__
 from lira_sapr_mcp.services.session import LiraSession
-from lira_sapr_mcp.tools import analysis, editing, results, tables
+from lira_sapr_mcp.tools import analysis, editing, results, script, tables
 from lira_sapr_mcp.tools import files as file_tools
 
 INSTRUCTIONS = """\
@@ -21,6 +21,7 @@ by lira_model_summary. A model argument is a .lir path or a model title; when om
 model active in LIRA is used. Files are backed up before the server first overwrites them.
 Results tools return extremes and the top rows only, converted to LIRA's current units.
 Table columns, FE type codes and the text format: resource lira://reference/tables.
+For anything no tool covers, lira_run_script runs Python with LIRA's COM objects.
 """
 
 TABLES_REFERENCE = "lira://reference/tables"
@@ -40,6 +41,7 @@ def build_server(session: LiraSession) -> MCPServer:
     editing.register(mcp, session)
     analysis.register(mcp, session)
     results.register(mcp, session)
+    script.register(mcp, session)
 
     @mcp.resource(
         TABLES_REFERENCE,

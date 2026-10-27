@@ -382,6 +382,20 @@ class ComLiraAdapter:
         finally:
             self._call("Unselect", doc.Unselect, "all", SEL_ELEMENTS)
 
+    def run_script(self, code: str, ref: str | None, timeout_s: float) -> dict[str, Any]:
+        """Run the agent's Python code with LIRA's objects (see services/scripts.py)."""
+        from lira_sapr_mcp.services.scripts import run_script
+
+        self.connect()
+        doc = self.find_document(ref) if ref else self._app.ActiveDocument
+        if doc is not None:
+            self._changed(doc)  # the script may change it: never treat it as only read
+        names = {"lira": self._app, "doc": doc, "adapter": self, "constants": self._c}
+        try:
+            return run_script(code, names, timeout_s)
+        finally:
+            del doc, names
+
     def delete_self_weight(self, ref: str) -> str:
         doc = self.find_document(ref)
         self._changed(doc)

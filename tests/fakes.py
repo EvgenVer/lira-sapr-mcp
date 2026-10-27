@@ -110,6 +110,13 @@ class FakeAdapter:
         d["modified"] = True
         return ""
 
+    def run_script(self, code, ref, timeout_s):
+        from lira_sapr_mcp.services.scripts import run_script
+
+        doc = self._get(ref) if ref else None
+        names = {"lira": None, "doc": doc, "adapter": self, "constants": None}
+        return run_script(code, names, timeout_s)
+
     def delete_self_weight(self, ref):
         self._get(ref).pop("self_weight", None)
         return ""
