@@ -19,6 +19,8 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         deadline = time.monotonic() + timeout_s
         while True:
             status = await session.run(session.adapter.analysis_status)
+            if status["status"] == "needs_user":
+                status["dialogs"] = [d.describe() for d in await session.dialogs()]
             if status["status"] not in ("running",) or time.monotonic() > deadline:
                 return status
             await asyncio.sleep(POLL_S)
@@ -55,7 +57,10 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         """
         if wait_s > 0:
             return await wait_for_end(wait_s)
-        return await session.run(session.adapter.analysis_status)
+        status = await session.run(session.adapter.analysis_status)
+        if status["status"] == "needs_user":
+            status["dialogs"] = [d.describe() for d in await session.dialogs()]
+        return status
 
     @mcp.tool()
     @lira_errors

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from lira_sapr_mcp.adapters.base import DocInfo, TableError, Units
+from lira_sapr_mcp.adapters.dialogs import Dialog
 from lira_sapr_mcp.adapters.discovery import LiraInstall
 from lira_sapr_mcp.com.worker import ComWorker
 from lira_sapr_mcp.config import Settings
@@ -25,6 +26,7 @@ class FakeAdapter:
         self.analysis = "idle"
         self.analysed: str | None = None
         self.deleted: set[str] = set()
+        self.dialogs_shown: list[Dialog] = []  # what LIRA's windows would show
 
     def connect(self) -> None:
         self.connected = True
@@ -116,6 +118,13 @@ class FakeAdapter:
         doc = self._get(ref) if ref else None
         names = {"lira": None, "doc": doc, "adapter": self, "constants": None}
         return run_script(code, names, timeout_s)
+
+    def _press_dialog_button(self, exe, button, title=None):  # stands for Win32, not COM
+        dialog = next(d for d in self.dialogs_shown if not title or title in d.title)
+        if button not in dialog.buttons:
+            raise LiraInputError(f"Dialog {dialog.title!r} has no button {button!r}")
+        self.dialogs_shown.remove(dialog)
+        return dialog
 
     def delete_self_weight(self, ref):
         self._get(ref).pop("self_weight", None)
@@ -227,5 +236,7 @@ def fake_session(tmp_path) -> tuple[LiraSession, FakeAdapter]:
         worker=worker,
         find=lambda: [INSTALL],
         make_adapter=lambda install: adapter,
+        dialogs=lambda exe: list(adapter.dialogs_shown),
+        press=adapter._press_dialog_button,
     )
     return session, adapter
