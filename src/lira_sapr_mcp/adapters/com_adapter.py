@@ -125,6 +125,10 @@ class ComLiraAdapter:
         self.capabilities = frozenset(caps)
         self._events = win32com.client.WithEvents(app, make_event_handler(self.analysis))
         log.info("connected to %s, capabilities: %s", self.install.progid, sorted(caps))
+        dirs = self.directories()
+        folder = dirs.get("TextDataDirectory") or dirs.get("DataDirectory")
+        if folder:
+            return_parked_files(Path(folder))
 
     def disconnect(self) -> None:
         """Drop our references to LIRA's COM objects (on the COM thread, before it ends).
@@ -682,6 +686,25 @@ class ComLiraAdapter:
             stresses_per=n("geometry", u.Stresses2),
             temperature=n("temperature", u.Temperature),
         )
+
+
+def return_parked_files(folder: Path) -> list[Path]:
+    """Put back the user's text files that a text export set aside and a crash left
+    renamed (``<name>.txt.lira-mcp-<id>``). A file whose name is taken again is left as
+    it is and logged."""
+    returned = []
+    for parked in folder.glob(f"*.{TEMP_TABLE_MARK}*"):
+        original = parked.with_name(parked.name.split(f".{TEMP_TABLE_MARK}")[0])
+        if original.exists():
+            log.warning("Parked file %s not returned: %s exists again", parked, original.name)
+            continue
+        try:
+            parked.rename(original)
+            returned.append(original)
+            log.warning("Returned the parked file %s", original)
+        except OSError as exc:
+            log.warning("Could not return the parked file %s: %s", parked, exc)
+    return returned
 
 
 def _area(rect: tuple[int, int, int, int]) -> int:

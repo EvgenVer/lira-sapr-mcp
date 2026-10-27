@@ -36,16 +36,35 @@ def default_config_path() -> Path:
     return Path(env) if env else app_data_dir() / "config.toml"
 
 
+# What each setting may be: a check and how to say it in an error.
+CHECKS = {
+    "lira_version": (lambda v: v is None or (isinstance(v, int) and v >= 2024),
+                     "a year such as 2024"),
+    "call_timeout_s": (lambda v: isinstance(v, int | float) and v > 0, "seconds above 0"),
+    "analysis_timeout_s": (lambda v: isinstance(v, int | float) and v > 0, "seconds above 0"),
+    "backup_dir_name": (lambda v: isinstance(v, str) and v.strip() and not set(v) & set(r"\/:"),
+                        r"a folder name without \ / :"),
+    "log_file": (lambda v: isinstance(v, str) and v.strip(), "a file path"),
+}  # fmt: skip
+
+
 def load_settings(path: Path | None = None) -> Settings:
     path = path or default_config_path()
     if not path.exists():
         return Settings()
-    with path.open("rb") as f:
-        raw = tomllib.load(f)
+    try:
+        with path.open("rb") as f:
+            raw = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise LiraInputError(f"Cannot read settings file {path}: {exc}") from exc
     known = {f.name for f in fields(Settings)}
     unknown = set(raw) - known
     if unknown:
         raise LiraInputError(f"Unknown settings in {path}: {', '.join(sorted(unknown))}")
+    for name, value in raw.items():
+        check, wanted = CHECKS[name]
+        if isinstance(value, bool) or not check(value):
+            raise LiraInputError(f"Setting {name} in {path} must be {wanted}, got {value!r}")
     if "log_file" in raw:
         raw["log_file"] = Path(raw["log_file"])
     return Settings(**raw)

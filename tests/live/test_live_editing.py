@@ -10,18 +10,7 @@ import pytest
 from mcp import Client
 from test_live_loads import FRAME
 
-from lira_sapr_mcp.config import Settings
-from lira_sapr_mcp.server import build_server
-from lira_sapr_mcp.services.session import LiraSession
-
 pytestmark = [pytest.mark.lira, pytest.mark.anyio]
-
-
-@pytest.fixture
-def mcp(tmp_path):
-    session = LiraSession(Settings(log_file=tmp_path / "log.txt"))
-    yield build_server(session)
-    session.close()
 
 
 async def ok(client, name, args=None):

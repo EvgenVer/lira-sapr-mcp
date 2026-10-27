@@ -48,6 +48,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         model_type is LIRA's system label (degrees of freedom per node):
         1 = 2D XOZ truss (X, Z); 2 = 2D XOZ frame (X, Z, UY); 3 = grillage/plate XOY
         (Z, UX, UY); 4 = 3D truss (X, Y, Z); 5 = general 3D (X, Y, Z, UX, UY, UZ).
+        LIRA's type library also has 6 and 15 (other schemes; see LIRA's documentation).
         title: up to 30 characters, no , . < > ( ) # ? * | \\ / :
         save_as: optional .lir path to save the new model to right away.
         """

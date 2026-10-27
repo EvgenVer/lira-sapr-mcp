@@ -101,3 +101,15 @@ def test_failed_start_does_not_leave_analysis_running(lira):
     with pytest.raises(LiraComError):
         adapter.start_analysis(doc.PathName)
     assert adapter.analysis.status != "running"
+
+
+def test_parked_text_files_go_back_unless_the_name_is_taken(tmp_path):
+    from lira_sapr_mcp.adapters.com_adapter import return_parked_files
+
+    (tmp_path / "frame.txt.lira-mcp-1a2b3c4d").write_text("owner's text")
+    (tmp_path / "slab.txt.lira-mcp-5e6f7a8b").write_text("older")
+    (tmp_path / "slab.txt").write_text("newer")
+    returned = return_parked_files(tmp_path)
+    assert returned == [tmp_path / "frame.txt"]
+    assert (tmp_path / "frame.txt").read_text() == "owner's text"
+    assert (tmp_path / "slab.txt.lira-mcp-5e6f7a8b").exists()

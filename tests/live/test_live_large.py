@@ -9,10 +9,6 @@ import time
 import pytest
 from mcp import Client
 
-from lira_sapr_mcp.config import Settings
-from lira_sapr_mcp.server import build_server
-from lira_sapr_mcp.services.session import LiraSession
-
 pytestmark = [pytest.mark.lira, pytest.mark.anyio]
 
 NX, NY, NZ = 22, 22, 9  # nodes along X, Y and Z; 3 m spans
@@ -47,13 +43,6 @@ def space_frame() -> tuple[str, int]:
         ]
     )
     return text + "\n", len(bars)
-
-
-@pytest.fixture
-def mcp(tmp_path):
-    session = LiraSession(Settings(log_file=tmp_path / "log.txt"))
-    yield build_server(session)
-    session.close()
 
 
 async def test_ten_largest_moments_of_a_large_model(mcp, workdir):
