@@ -39,3 +39,12 @@ def plain(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {k: plain(v) for k, v in obj.items()}
     return obj
+
+
+async def backup_before_change(session: Any, ref: str) -> str | None:
+    """Back up a saved model before the session first changes it; the backup's path."""
+    info = await session.run(session.adapter.document_info, ref)
+    if not info.saved:
+        return None
+    backup = session.backups.ensure(info.path)
+    return str(backup) if backup else None

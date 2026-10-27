@@ -9,7 +9,7 @@ from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services import loads as loads_service
 from lira_sapr_mcp.services.session import LiraSession
 from lira_sapr_mcp.services.textformat import Load
-from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors, plain
+from lira_sapr_mcp.tools.common import READ_ONLY, backup_before_change, lira_errors, plain
 
 Cell = str | int | float | None
 # LIRA writes the text export in the background; the adapter waits up to 120 s for it.
@@ -17,13 +17,6 @@ EXPORT_TIMEOUT_S = 150.0
 
 
 def register(mcp: MCPServer, session: LiraSession) -> None:
-    async def backup_before_change(ref: str) -> str | None:
-        info = await session.run(session.adapter.document_info, ref)
-        if not info.saved:
-            return None
-        backup = session.backups.ensure(info.path)
-        return str(backup) if backup else None
-
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors
     async def lira_list_input_tables() -> list[str]:
@@ -74,7 +67,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         with 0-based row/column. The model file is backed up before its first change.
         """
         ref = await session.resolve(model)
-        backup = await backup_before_change(ref)
+        backup = await backup_before_change(session, ref)
         errors = await session.run(
             session.adapter.write_table, ref, table, rows, parse_numbers(numbers)
         )
@@ -130,7 +123,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
             raise LiraInputError(
                 f"Bad load {exc!s}: each load needs case, target, type, direction, values"
             ) from exc
-        backup = await backup_before_change(ref)
+        backup = await backup_before_change(session, ref)
         result = await session.run(
             loads_service.set_loads,
             session.adapter,

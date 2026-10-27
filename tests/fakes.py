@@ -17,7 +17,9 @@ class FakeAdapter:
         self.install = install
         self.connected = False
         self.capabilities = frozenset({"OpenDocument", "ImportFile", "StartAnalysis"})
-        self.table_kinds = {"Nodes_Coordinates": 2, "Elements_TypeAndNodes": 3, "LoadCases": 25}
+        self.table_kinds = {"Nodes_Coordinates": 2, "Elements_TypeAndNodes": 3, "LoadCases": 25,
+                            "Nodes_Restraints": 4, "Stiffnesses": 9, "Elements_Stiffnesses": 10,
+                            "Stiffnesses_Factors": 28}  # fmt: skip
         self.docs: dict[str, dict] = {}
         self.active: str | None = None
         self.analysis = "idle"
@@ -94,9 +96,23 @@ class FakeAdapter:
         if name not in self.table_kinds:
             return [TableError(-1, -1, "unknown table")]
         d = self._get(ref)
-        d["tables"][name] = [list(r) for r in rows]
+        if numbers:  # as LIRA: replace (or add) only the rows of these numbers
+            kept = [r for r in d["tables"].get(name, []) if r[0] not in numbers]
+            d["tables"][name] = sorted(kept + [list(r) for r in rows], key=lambda r: r[0])
+        else:
+            d["tables"][name] = [list(r) for r in rows]
         d["modified"] = True
         return []
+
+    def self_weight(self, ref, load_case, factor, elements=None):
+        d = self._get(ref)
+        d["self_weight"] = (load_case, factor, elements)
+        d["modified"] = True
+        return ""
+
+    def delete_self_weight(self, ref):
+        self._get(ref).pop("self_weight", None)
+        return ""
 
     def analysis_status(self):
         return {"status": self.analysis, "model": self.analysed}

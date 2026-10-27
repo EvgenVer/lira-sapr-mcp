@@ -56,6 +56,9 @@ APP_METHODS = (
 # Menu command "Create text file" (menu resource of Visor.resources.dll).
 EXPORT_TEXT_CMD = {2024: 5049}
 DOC_METHODS = ("SetGenerateCsvTables", "SetDeadWeightLoad", "SetSoilModel", "Select")
+# LiraDeadWeightLoadEnum: add to all or selected elements, delete all; LiraSelEnum elements.
+DEAD_ALL, DEAD_SELECTED, DEAD_DELETE = 32, 16, -1
+SEL_ELEMENTS = 0
 
 
 def com_message(exc: BaseException) -> str:
@@ -358,6 +361,31 @@ class ComLiraAdapter:
         if not ok and not errors:
             errors = [TableError(-1, -1, "LIRA rejected the table without details")]
         return errors
+
+    def self_weight(
+        self, ref: str, load_case: int, factor: float, elements: list[int] | None = None
+    ) -> str:
+        """Add self weight loads (of elements whose sections have a density) to a load
+        case, which LIRA creates if needed; only ``elements`` if given. Returns LIRA's
+        message, if any."""
+        doc = self.find_document(ref)
+        self._changed(doc)
+        doc.CurrentLoadCase = load_case
+        if not elements:
+            return str(self._call("SetDeadWeightLoad", doc.SetDeadWeightLoad, DEAD_ALL, factor))
+        numbers = " ".join(map(str, elements))
+        self._call("Select", doc.Select, numbers, SEL_ELEMENTS)
+        try:
+            return str(
+                self._call("SetDeadWeightLoad", doc.SetDeadWeightLoad, DEAD_SELECTED, factor)
+            )
+        finally:
+            self._call("Unselect", doc.Unselect, "all", SEL_ELEMENTS)
+
+    def delete_self_weight(self, ref: str) -> str:
+        doc = self.find_document(ref)
+        self._changed(doc)
+        return str(self._call("SetDeadWeightLoad", doc.SetDeadWeightLoad, DEAD_DELETE, 1.0))
 
     # --- text format ----------------------------------------------------------------
 

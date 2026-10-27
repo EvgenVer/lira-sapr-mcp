@@ -25,7 +25,7 @@ read the table of a model that has such data (`lira_read_table`) before writing 
 | `Elements_Stiffnesses` | element, stiffness number | verified |
 | `Elements_DesignSectionsCount` | element, number of design sections (bars: default 2, start and end) | verified |
 | `Stiffnesses` | number, section type code, colour `#rrggbb`, null, parameters as text, then nulls | observed; create stiffnesses with the text format |
-| `Stiffnesses_Factors` | element, stiffness factor (1.0) | observed |
+| `Stiffnesses_Factors` | element, a factor (1.0); it does not change a linear analysis (verified) — to change stiffness, assign another stiffness | observed |
 | `LoadCases` | number, name, problem text (`"1. Основная задача: ..."`), kind (`Постоянное(П)`, `Длительное(Д)`, `Кратковременное(К)`, `Мгновенное(М)`, `Особое ...`), null | verified (number, name, kind) |
 | `DCL` | first row all null; then per load case: number, name, kind, null, sign `+`, then 4 coefficients (e.g. `0, 1.1, 1, 0`) | observed |
 | `StructuralBlocks` | elements as text `"1-1080 1889-1924"`, `Блок`, block number, null, null, name, colour | observed |
@@ -84,7 +84,9 @@ Model types (`model_type`, degrees of freedom per node): 1 2D truss in XOZ (X, Z
   the values below read as described.
 - 1: elements in order, `FE-type stiffness node node .../`.
 - 3: stiffnesses, `number S0 E B H/` a rectangular section (E in t/m2, B and H in cm);
-  `0 RO density/` density (t/m3) for the stiffness above.
+  `0 RO weight/` the weight per length (t/m) for the stiffness above: `RO 2.5` with a
+  40 x 60 cm section becomes density `Ro:10.4167` (t/m3) in the `Stiffnesses` table.
+  Self weight (`lira_self_weight`) uses it; it is a load of type 16 in document 6.
 - 4: node coordinates in order, `X Y Z/`.
 - 5: restraints, `node direction direction .../` with directions 1-6 = X Y Z UX UY UZ.
 - 6: loads, `target type direction row case/`: type 0 is a nodal load (target is a
