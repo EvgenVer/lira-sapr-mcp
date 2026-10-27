@@ -6,6 +6,7 @@ from typing import Any
 from mcp.server import MCPServer
 
 from lira_sapr_mcp.adapters.base import norm_path, parse_numbers
+from lira_sapr_mcp.adapters.results import force_kinds
 from lira_sapr_mcp.services import results as rs
 from lira_sapr_mcp.services.session import LiraSession
 from lira_sapr_mcp.tools.common import READ_ONLY, lira_errors
@@ -89,27 +90,63 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
 
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors
-    async def lira_bar_forces(
+    async def lira_element_forces(
         model: str | None = None,
         elements: list[int] | str | None = None,
         load_cases: list[int] | None = None,
+        families: list[str] | None = None,
         components: list[str] | None = None,
         sort_by: str | None = None,
         by_abs: bool = True,
         top: int | None = 20,
     ) -> dict[str, Any]:
-        """Internal forces in bar elements of load cases after lira_run_analysis.
+        """Internal forces and stresses of elements in load cases after lira_run_analysis,
+        answered per element family, since each family has its own components:
 
-        One row per element, load case and design section (section 1 = start of the bar;
-        the number of sections is set per element in Elements_DesignSectionsCount).
-        Components: N, Qy, Qz (force unit set in LIRA), Mx, My, Mz (force * length).
-        model, elements, sort_by, by_abs, top: as in lira_node_displacements. Non-bar
-        elements are skipped.
+        bar: N, Qy, Qz (force), Mx, My, Mz (force*length), Ry, Rz (soil), Bw, Tw;
+        plate: Nx, Ny, Nz, Txy, Txz (stress), Mx, My, Mxy (force*length/length),
+        Qx, Qy (force/length), Rz (soil pressure); solid: Nx, Ny, Nz, Txy, Txz, Tyz;
+        special, special_58_59, special_310, special_264: their forces.
+        Units are those set in LIRA and are listed per component. One row per element,
+        load case, shape (dynamic load cases only: the mode number) and design section
+        (bars: section 1 = start; set the count in Elements_DesignSectionsCount).
+        families: e.g. ["bar"] (default all). model, elements, components, sort_by,
+        by_abs, top: as in lira_node_displacements, applied within each family.
         """
         path = await model_path(model)
         rows = await session.run(
-            session.adapter.bar_forces, path, parse_numbers(elements), load_cases
+            session.adapter.element_forces,
+            path,
+            parse_numbers(elements),
+            load_cases,
+            families,
+            timeout=session.settings.call_timeout_s * 5,
         )
         u = await session.run(session.adapter.units)
-        units = {"force": u.forces, "moment_length": u.forces_per}
-        return await answer(path, rows, rs.BAR_KIND, units, components, sort_by, by_abs, top)
+        units = {
+            "force": u.forces,
+            "moment_length": u.forces_per,
+            "stress": u.stresses,
+            "stress_length": u.stresses_per,
+        }
+        by_family: dict[str, list[dict]] = {}
+        for row in rows:
+            by_family.setdefault(row.pop("family"), []).append(row)
+        result: dict[str, Any] = {"model": path, "families": {}}
+        for family, family_rows in by_family.items():
+            kinds = force_kinds(family)
+            used = rs.convert(family_rows, kinds, units)
+            wanted = components or list(kinds)
+            if sort_by and not any(sort_by in r for r in family_rows):
+                summary = rs.summarize(family_rows, wanted, top=top)
+                summary["note"] = f"no {sort_by} in {family} elements: rows are not sorted"
+            else:
+                summary = rs.summarize(family_rows, wanted, sort_by=sort_by, by_abs=by_abs, top=top)
+            summary["units"] = {c: used[c] for c in wanted if c in used}
+            result["families"][family] = summary
+        if not by_family:
+            result["note"] = "no elements of the requested families"
+        warning = name_warning(path)
+        if warning:
+            result["warning"] = warning
+        return result

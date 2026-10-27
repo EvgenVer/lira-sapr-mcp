@@ -5,6 +5,9 @@ method: beam end moments -23.858 t*m, midspan +21.142 t*m, column base 11.575 t*
 column axial force -30 t.
 """
 
+import shutil
+from pathlib import Path
+
 import pytest
 from mcp import Client
 from test_live_loads import FRAME
@@ -45,10 +48,10 @@ async def test_frame_forces_match_hand_calculation(mcp, workdir):
         status = await analyse_open(client, path)
         assert status["protocol"]["clean"], status
         beam = await client.call_tool(
-            "lira_bar_forces", {"model": path, "elements": "3", "components": ["My"]}
+            "lira_element_forces", {"model": path, "elements": "3", "components": ["My"]}
         )
         columns = await client.call_tool(
-            "lira_bar_forces",
+            "lira_element_forces",
             {"elements": [1, 2], "components": ["N", "My"], "sort_by": "My", "top": None},
         )
         moved = await client.call_tool(
@@ -56,13 +59,13 @@ async def test_frame_forces_match_hand_calculation(mcp, workdir):
         )
     for r in (beam, columns, moved):
         assert not r.is_error, r.content
-    b = beam.structured_content
+    b = beam.structured_content["families"]["bar"]
     unit = b["units"]["My"]
     my = {r["section"]: in_tons(r["My"], unit) for r in b["rows"]}
     assert my[1] == pytest.approx(-23.858, abs=0.01)
     assert my[2] == pytest.approx(21.142, abs=0.01)
     assert my[3] == pytest.approx(-23.858, abs=0.01)
-    c = columns.structured_content
+    c = columns.structured_content["families"]["bar"]
     assert c["total_rows"] == 6
     assert in_tons(c["rows"][0]["My"], c["units"]["My"]) == pytest.approx(23.858, abs=0.01)
     bases = [r for r in c["rows"] if r["section"] == 1]
@@ -84,5 +87,40 @@ async def analyse_open(client, path):
 async def test_results_of_a_model_never_analysed(mcp, workdir):
     path = str(workdir / "lmcp_res_none.lir")
     async with Client(mcp) as client:
-        res = await client.call_tool("lira_bar_forces", {"model": path})
+        res = await client.call_tool("lira_element_forces", {"model": path})
     assert res.is_error and "No analysis results" in res.content[0].text
+
+
+EXAMPLE_04 = (
+    Path(r"C:\Users\Public\Documents\LIRA SAPR\LIRA SAPR 2024\Manual\RU")
+    / "04_пространственный каркас с фунд_плитой на упругом основании"
+    / "04_3D каркас_упругое основание.lir"
+)
+
+
+async def test_plates_and_dynamic_shapes_of_example_04(mcp, workdir):
+    """Frame with a slab on elastic base; load case 4 is seismic with modes 1, 5, 11."""
+    if not EXAMPLE_04.exists():
+        pytest.skip("LIRA example models are not installed")
+    path = str(workdir / "lmcp_ex04.lir")
+    shutil.copy(EXAMPLE_04, path)
+    async with Client(mcp) as client:
+        await client.call_tool("lira_open_model", {"path": path})
+        status = await analyse_open(client, path)
+        assert status["status"] == "finished", status
+        forces = await client.call_tool(
+            "lira_element_forces",
+            {"model": path, "load_cases": [4], "sort_by": "Mx", "top": 5},
+        )
+        moved = await client.call_tool(
+            "lira_node_displacements", {"model": path, "nodes": "100", "load_cases": [4]}
+        )
+    assert not forces.is_error, forces.content
+    families = forces.structured_content["families"]
+    assert set(families) >= {"bar", "plate"}
+    plate = families["plate"]
+    assert {"Mx", "My", "Qx"} <= set(plate["units"])
+    assert {r["shape"] for r in plate["rows"]} <= {1, 5, 11}
+    assert plate["extremes"]["Mx"]["max"]["at"]["case"] == 4
+    d = moved.structured_content
+    assert sorted(r["shape"] for r in d["rows"]) == [1, 5, 11]

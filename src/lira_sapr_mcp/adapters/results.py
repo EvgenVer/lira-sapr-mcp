@@ -1,8 +1,10 @@
 """Reading analysis results through LiraResAPI.dll (runs on the COM thread).
 
 The library reads LIRA's result files by model name (no path), in fixed units: meters,
-radians, ton-force and ton-force * meter. Indices: load cases and design sections from
-1, deformed shape 1 for static load cases, history 0 outside non-linear histories.
+radians, ton-force (tf) and their products. Indices: load cases and design sections from
+1, history 0 outside non-linear histories. A static load case has one deformed shape (1);
+a dynamic one has several, which displacements address by mode number (e.g. 1, 5, 11)
+and forces by position (1, 2, 3) - checked on a live LIRA 2024 R2.
 """
 
 from pathlib import Path
@@ -19,7 +21,44 @@ RES_TYPELIB = {2024: ("{BD6C09E6-B5EE-4DAB-8D61-C009BA755C46}", 1, 0)}
 RES_CLASS = {2024: "{4F4546AE-AC54-48A2-9414-1B9EF6519A37}"}
 
 DISPLACEMENTS = {1: "X", 2: "Y", 3: "Z", 4: "UX", 5: "UY", 6: "UZ"}
-BAR_FORCES = {1: "N", 2: "Mx", 3: "My", 4: "Qz", 5: "Mz", 6: "Qy"}
+
+# LiraElementFamilyEnum -> (family name, getter prefix)
+FAMILIES = {
+    1: ("bar", "GetBar"),
+    2: ("plate", "GetPlate"),
+    3: ("solid", "GetSolid"),
+    4: ("special", "GetSpecElement"),
+    5: ("special_58_59", "GetSpec_58_59_"),
+    6: ("special_310", "GetSpec_310_"),
+    7: ("special_264", "GetSpec_264_"),
+}
+F, M, BI = "force", "moment", "bimoment"
+FPL, MPL, S = "force_per_length", "moment_per_length", "stress"
+# LiraForceEnum -> (family, component, unit kind); units as the type library states them
+# (it gives Mx, My, Mz of special elements in tf, not tf*m).
+FORCES = {
+    1: (1, "N", F), 2: (1, "Mx", M), 3: (1, "My", M), 4: (1, "Qz", F), 5: (1, "Mz", M),
+    6: (1, "Qy", F), 7: (1, "Ry", F), 8: (1, "Rz", F), 9: (1, "Bw", BI), 10: (1, "Tw", M),
+    11: (2, "Nx", S), 12: (2, "Ny", S), 13: (2, "Nz", S), 14: (2, "Txy", S),
+    15: (2, "Txz", S), 16: (2, "Mx", MPL), 17: (2, "My", MPL), 18: (2, "Mxy", MPL),
+    19: (2, "Qx", FPL), 20: (2, "Qy", FPL), 21: (2, "Rz", S),
+    22: (3, "Nx", S), 23: (3, "Ny", S), 24: (3, "Nz", S), 25: (3, "Txy", S),
+    26: (3, "Txz", S), 27: (3, "Tyz", S),
+    28: (4, "N", F), 29: (4, "Nx", F), 30: (4, "Ny", F), 31: (4, "Nz", F), 32: (4, "Mx", F),
+    33: (4, "My", F), 34: (4, "Mz", F), 35: (4, "Qy", F), 36: (4, "Qz", F), 37: (4, "Rx", F),
+    38: (4, "Ry", F), 39: (4, "Rz", F), 40: (4, "Rux", M), 41: (4, "Ruy", M),
+    42: (4, "Ruz", M),
+    43: (5, "Qz", F), 44: (5, "Ny", F), 45: (5, "Qx", F),
+    46: (6, "N", F), 47: (6, "My", M), 48: (6, "Mx", M), 49: (6, "Qz", F), 50: (6, "Mz", M),
+    51: (6, "Qy", F),
+    52: (7, "N", F), 53: (7, "Qz", F), 54: (7, "Qy", F),
+}  # fmt: skip
+
+
+def force_kinds(family: str) -> dict[str, str]:
+    """Unit kind of each component of a family, e.g. {"N": "force", "My": "moment"}."""
+    code = next(c for c, (name, _) in FAMILIES.items() if name == family)
+    return {comp: kind for fam, comp, kind in FORCES.values() if fam == code}
 
 
 class ResultsReader:
@@ -84,19 +123,29 @@ class ResultsReader:
         )
         directions = _numbers(resp.Directions.AddToString())
         getters = {d: getattr(resp, f"GetNode{name}") for d, name in DISPLACEMENTS.items()}
+        shapes = _shapes(resp.LoadCases, cases)
         rows = []
         for node in _numbers(resp.NodeNumbers.AddToString()):
-            for case in _cases(resp.LoadCases, cases):
-                row: dict[str, Any] = {"node": node, "case": case}
-                for d in directions:
-                    if d in getters:
-                        row[DISPLACEMENTS[d]] = float(getters[d](node, case, 1, 0))
-                rows.append(row)
+            for case, modes in shapes:
+                for _, mode in modes:
+                    row: dict[str, Any] = {"node": node, "case": case}
+                    if len(modes) > 1:
+                        row["shape"] = mode
+                    for d in directions:
+                        if d in getters:
+                            row[DISPLACEMENTS[d]] = float(getters[d](node, case, mode, 0))
+                    rows.append(row)
         return rows
 
-    def bar_forces(
-        self, model_path: str, elements: list[int] | None, cases: list[int] | None
+    def element_forces(
+        self,
+        model_path: str,
+        elements: list[int] | None,
+        cases: list[int] | None,
+        families: list[str] | None = None,
     ) -> list[dict]:
+        """Forces and stresses per element, load case, shape and design section; each row
+        names its element family, since components differ between families."""
         if not elements:
             main = self._query(
                 model_path, "kLiraRequest_MainData", "ILiraMainDataRequest", "MainData"
@@ -110,23 +159,30 @@ class ResultsReader:
             "LoadCaseForces",
             lambda req: req.Elements.AddFromString(wanted),
         )
-        bar = self._c.kLiraFamily_Bar
+        shapes = _shapes(resp.LoadCases, cases)
+        getters: dict[int, Any] = {}
         rows = []
         for el in elements:
-            if resp.GetFamily(el) != bar:
+            family = FAMILIES.get(int(resp.GetFamily(el)))
+            if family is None or (families and family[0] not in families):
                 continue
-            available = set(_numbers(resp.GetForces(el).AddToString()))
-            getters = {
-                f: getattr(resp, f"GetBar{name}")
-                for f, name in BAR_FORCES.items()
-                if f in available
-            }
-            for case in _cases(resp.LoadCases, cases):
-                for section in range(1, resp.GetSectionCount(el) + 1):
-                    row: dict[str, Any] = {"element": el, "case": case, "section": section}
-                    for f, get in getters.items():
-                        row[BAR_FORCES[f]] = float(get(el, section, case, 1, 0))
-                    rows.append(row)
+            components = []
+            for code in _numbers(resp.GetForces(el).AddToString()):
+                if code in FORCES:
+                    if code not in getters:
+                        getters[code] = getattr(resp, family[1] + FORCES[code][1])
+                    components.append((FORCES[code][1], getters[code]))
+            sections = resp.GetSectionCount(el)
+            for case, modes in shapes:
+                for position, mode in modes:
+                    for section in range(1, sections + 1):
+                        row: dict[str, Any] = {"family": family[0], "element": el, "case": case}
+                        if len(modes) > 1:
+                            row["shape"] = mode
+                        row["section"] = section
+                        for name, get in components:
+                            row[name] = float(get(el, section, case, position, 0))
+                        rows.append(row)
         return rows
 
 
@@ -140,6 +196,16 @@ def _scode(exc: Exception) -> int | None:
 
 def _numbers(text: str) -> list[int]:
     return parse_numbers(str(text or "")) or []
+
+
+def _shapes(infos: Any, wanted: list[int] | None) -> list[tuple[int, list[tuple[int, int]]]]:
+    """Per load case: its deformed shapes as (position from 1, mode number)."""
+    out = []
+    by_number = {int(infos.Item(i).Number): infos.Item(i) for i in range(infos.Count)}
+    for case in _cases(infos, wanted):
+        modes = _numbers(by_number[case].DeformedShapes.AddToString()) or [1]
+        out.append((case, list(enumerate(modes, start=1))))
+    return out
 
 
 def _cases(infos: Any, wanted: list[int] | None) -> list[int]:

@@ -43,7 +43,7 @@ flowchart LR
 | Таблицы ввода | `lira_list_input_tables`, `lira_read_table`, `lira_write_table` | `tools/tables.py` |
 | Нагрузки и текстовый формат | `lira_read_loads`, `lira_set_loads`, `lira_import_text_model`, `lira_export_text` | `tools/tables.py` |
 | Расчёт | `lira_run_analysis`, `lira_analysis_status`, `lira_stop_analysis`, `lira_analysis_protocol` | `tools/analysis.py` |
-| Результаты | `lira_node_displacements`, `lira_bar_forces` | `tools/results.py` |
+| Результаты | `lira_node_displacements`, `lira_element_forces` (стержни, пластины, объёмные и специальные КЭ; формы динамических загружений) | `tools/results.py` |
 | Остальные результаты (РСУ, РСН, периоды, арматура), экспорт CSV/Excel | — | этап 2 |
 | Высокий уровень, скрипт агента, справочник таблиц | — | этап 2 |
 | Диалоги ЛИРЫ, картинка модели | — | этап 3 |

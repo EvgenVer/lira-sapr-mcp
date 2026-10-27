@@ -2,6 +2,7 @@ import pytest
 from mcp import Client
 
 from fakes import fake_session
+from lira_sapr_mcp.adapters.results import force_kinds
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.server import build_server
 from lira_sapr_mcp.services import results as rs
@@ -15,9 +16,13 @@ def rows():
     ]
 
 
+BAR = force_kinds("bar")
+PLATE = force_kinds("plate")
+
+
 def test_tons_become_kilonewtons_and_meters_millimeters():
     data = [{"element": 1, "N": 1.0, "My": 1.0}, {"node": 1, "Z": -0.002, "UY": 0.01}]
-    used = rs.convert(data[:1], rs.BAR_KIND, {"force": "kN", "moment_length": "m"})
+    used = rs.convert(data[:1], BAR, {"force": "kN", "moment_length": "m"})
     rs.convert(data[1:], rs.DISPLACEMENT_KIND, {"length": "mm"})
     assert data[0]["N"] == pytest.approx(9.80665)
     assert data[0]["My"] == pytest.approx(9.80665)
@@ -28,8 +33,28 @@ def test_tons_become_kilonewtons_and_meters_millimeters():
 
 def test_unknown_units_keep_lira_units():
     data = [{"element": 1, "N": 2.0}]
-    used = rs.convert(data, rs.BAR_KIND, {"force": "none"})
+    used = rs.convert(data, BAR, {"force": "none"})
     assert data[0]["N"] == 2.0 and used["N"] == "t"
+
+
+def test_plate_units_per_length_and_stresses():
+    row = {"Mx": 1.0, "Qx": 1.0, "Nx": 1.0}
+    units = {"force": "kN", "moment_length": "cm", "stress": "MPa"}
+    used = rs.convert([row], PLATE, units)
+    assert row["Mx"] == pytest.approx(9.80665) and used["Mx"] == "kN*cm/cm"
+    assert row["Qx"] == pytest.approx(0.0980665) and used["Qx"] == "kN/cm"
+    assert row["Nx"] == pytest.approx(0.00980665) and used["Nx"] == "MPa"
+    row = {"Nx": 1.0}
+    used = rs.convert([row], PLATE, {"stress": "kN", "stress_length": "cm"})
+    assert row["Nx"] == pytest.approx(9.80665e-4) and used["Nx"] == "kN/cm2"
+
+
+def test_every_force_code_has_a_family_and_a_known_kind():
+    from lira_sapr_mcp.adapters.results import FAMILIES, FORCES
+
+    kinds = {"force", "moment", "bimoment", "force_per_length", "moment_per_length", "stress"}
+    assert sorted(FORCES) == list(range(1, 55))
+    assert all(fam in FAMILIES and kind in kinds for fam, _, kind in FORCES.values())
 
 
 def test_extremes_name_their_place():
@@ -59,18 +84,25 @@ def test_unknown_components_are_reported():
 
 
 @pytest.mark.anyio
-async def test_bar_forces_tool_converts_and_reduces(tmp_path):
+async def test_element_forces_are_answered_per_family(tmp_path):
     session, _ = fake_session(tmp_path)
     async with Client(build_server(session)) as client:
         res = await client.call_tool(
-            "lira_bar_forces",
-            {"model": str(tmp_path / "frame.lir"), "components": ["My"], "sort_by": "My", "top": 1},
+            "lira_element_forces",
+            {"model": str(tmp_path / "frame.lir"), "sort_by": "My", "top": 1},
         )
-    out = res.structured_content
+        only_bars = await client.call_tool(
+            "lira_element_forces", {"model": str(tmp_path / "frame.lir"), "families": ["bar"]}
+        )
     assert not res.is_error, res.content
-    assert out["units"] == {"My": "kN*m"}
-    assert out["rows"] == [{"element": 1, "case": 1, "section": 2, "My": 29.42}]
-    assert out["extremes"]["My"]["min"]["value"] == pytest.approx(-19.6133)
+    bar = res.structured_content["families"]["bar"]
+    assert bar["units"]["My"] == "kN*m"
+    assert bar["rows"] == [{"element": 1, "case": 1, "section": 2, "N": -9.80665, "My": 29.42}]
+    assert bar["extremes"]["My"]["min"]["value"] == pytest.approx(-19.6133)
+    plate = res.structured_content["families"]["plate"]
+    assert plate["extremes"]["Nx"]["max"]["value"] == pytest.approx(98.0665)
+    assert "not sorted" in plate["note"]
+    assert list(only_bars.structured_content["families"]) == ["bar"]
 
 
 @pytest.mark.anyio
@@ -91,7 +123,7 @@ async def test_same_name_models_get_a_warning(tmp_path):
 async def test_missing_results_say_what_to_do(tmp_path):
     session, _ = fake_session(tmp_path)
     async with Client(build_server(session)) as client:
-        res = await client.call_tool("lira_bar_forces", {"model": str(tmp_path / "x.lir")})
+        res = await client.call_tool("lira_element_forces", {"model": str(tmp_path / "x.lir")})
     assert res.is_error and "No analysis results" in res.content[0].text
 
 

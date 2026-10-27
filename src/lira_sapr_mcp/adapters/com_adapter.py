@@ -465,10 +465,14 @@ class ComLiraAdapter:
     ) -> list[dict]:
         return self.results.node_displacements(model_path, nodes, cases)
 
-    def bar_forces(
-        self, model_path: str, elements: list[int] | None, cases: list[int] | None
+    def element_forces(
+        self,
+        model_path: str,
+        elements: list[int] | None,
+        cases: list[int] | None,
+        families: list[str] | None = None,
     ) -> list[dict]:
-        return self.results.bar_forces(model_path, elements, cases)
+        return self.results.element_forces(model_path, elements, cases, families)
 
     # --- units ----------------------------------------------------------------------
 

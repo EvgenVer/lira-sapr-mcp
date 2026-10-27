@@ -123,13 +123,16 @@ class FakeAdapter:
         return info
 
     # Beam 1 with 3 sections in t*m; node 2 moving down 1.25 mm, in m.
-    def bar_forces(self, model_path, elements, cases):
+    # Plus plate 2 with one point, stresses in tf/m2.
+    def element_forces(self, model_path, elements, cases, families=None):
         if not Path(model_path).stem.startswith("frame"):
             raise LiraInputError(f"No analysis results for {Path(model_path).stem!r}")
-        return [
-            {"element": 1, "case": 1, "section": s, "N": -1.0, "My": my, "Qz": 2.0}
+        rows = [
+            {"family": "bar", "element": 1, "case": 1, "section": s, "N": -1.0, "My": my}
             for s, my in ((1, -2.0), (2, 3.0), (3, -2.0))
         ]
+        rows.append({"family": "plate", "element": 2, "case": 1, "section": 1, "Nx": 10.0})
+        return [r for r in rows if not families or r["family"] in families]
 
     def node_displacements(self, model_path, nodes, cases):
         return [
