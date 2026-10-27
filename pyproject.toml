@@ -31,6 +31,9 @@ packages = ["src/lira_sapr_mcp"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# Throwaway experiment scripts against live LIRA; kept for reference, not product code.
+extend-exclude = ["spikes"]
+force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]

@@ -19,3 +19,6 @@ site/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Spike outputs (LIRA models, logs)
+spikes/out/
