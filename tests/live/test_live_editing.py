@@ -76,3 +76,18 @@ async def test_stiffer_group_moves_less(mcp, workdir):
     assert wider == pytest.approx(before / 2, rel=1e-3)
     # The factor changed nothing; case 2 (self weight, 5.5 t/m) moves less than case 1.
     assert stiffer == pytest.approx(wider, rel=1e-6)
+
+
+async def test_restore_undoes_a_saved_change(mcp, workdir):
+    path = str(workdir / "lmcp_restore.lir")
+    async with Client(mcp) as client:
+        await ok(client, "lira_import_text_model", {"text": FRAME, "save_as": path})
+        added = await ok(client, "lira_add_nodes", {"coordinates": [[3, 0, 6]]})
+        await ok(client, "lira_save_model", {})
+        changed = await ok(client, "lira_model_summary", {})
+        restored = await ok(client, "lira_restore_backup", {"model": path})
+        after = await ok(client, "lira_model_summary", {})
+        await ok(client, "lira_close_model", {"model": path, "discard_changes": True})
+    assert added["backup"] and changed["nodes"] == 5
+    assert restored["reopened"] and restored["restored_from"] == added["backup"]
+    assert after["nodes"] == 4

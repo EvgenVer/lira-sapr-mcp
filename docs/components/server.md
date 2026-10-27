@@ -34,12 +34,12 @@ flowchart LR
 
 ### Инструменты MCP
 
-Тридцать восемь инструментов, все с префиксом `lira_`. Инструменты только для чтения помечены
+Сорок инструментов, все с префиксом `lira_`. Инструменты только для чтения помечены
 для агента признаком `readOnlyHint`.
 
 | Группа | Инструменты | Код |
 |---|---|---|
-| Сведения и файлы | `lira_status`, `lira_list_models`, `lira_open_model`, `lira_create_model`, `lira_save_model`, `lira_close_model`, `lira_model_summary` | `tools/files.py` |
+| Сведения и файлы | `lira_status`, `lira_list_models`, `lira_open_model`, `lira_create_model`, `lira_save_model`, `lira_close_model`, `lira_model_summary`, `lira_list_backups`, `lira_restore_backup` | `tools/files.py` |
 | Таблицы ввода | `lira_list_input_tables`, `lira_read_table`, `lira_write_table` | `tools/tables.py` |
 | Нагрузки и текстовый формат | `lira_read_loads`, `lira_set_loads`, `lira_import_text_model`, `lira_export_text` | `tools/tables.py` |
 | Расчёт | `lira_run_analysis`, `lira_analysis_status`, `lira_stop_analysis`, `lira_analysis_protocol`, `lira_delete_results` | `tools/analysis.py` |
@@ -69,7 +69,9 @@ flowchart LR
   создаёт адаптер, при первом вызове подключается к ЛИРЕ и передаёт задания в COM-поток.
 - **Резервные копии** (`services/backups.py`): перед первой правкой или перезаписью
   файла в сессии копируют `.lir` в папку `lira-mcp-backups` рядом с моделью с меткой
-  времени в имени.
+  времени в имени. Откат (`lira_restore_backup`) сначала копирует текущий файл туда же,
+  затем кладёт выбранную копию на место модели; открытую модель сервер закрывает и
+  открывает снова. Поэтому повторный откат к самой новой копии отменяет предыдущий.
 - **Сводка модели** (`services/models.py`): число узлов и элементов, элементы по типам
   КЭ, жёсткости, загружения и единицы измерения — чтобы агент понял модель за один вызов.
   Раздел «results» говорит, есть ли у модели результаты расчёта и когда они записаны.

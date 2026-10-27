@@ -1,11 +1,12 @@
-"""Tools: LIRA status, opening, creating, saving and closing models, model summary."""
+"""Tools: LIRA status, opening, creating, saving and closing models, backups, summary."""
 
 from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.types import ToolAnnotations
 
-from lira_sapr_mcp.adapters.base import MODEL_TYPES
+from lira_sapr_mcp.adapters.base import MODEL_TYPES, norm_path
 from lira_sapr_mcp.errors import LiraInputError
 from lira_sapr_mcp.services.models import model_summary
 from lira_sapr_mcp.services.session import LiraSession
@@ -95,6 +96,50 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
             session.backups.ensure(info.path)
         await session.run(session.adapter.close_document, ref, discard_changes)
         return {"closed": plain(info)}
+
+    async def file_of(model: str | None) -> str:
+        """A .lir path as given (the model may be closed), else an open model's file."""
+        if model and model.lower().endswith(".lir"):
+            return model
+        info = await session.run(session.adapter.document_info, model)
+        if not info.saved:
+            raise LiraInputError(f"{info.title} has never been saved, so it has no backups")
+        return info.path
+
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_list_backups(model: str | None = None) -> dict[str, Any]:
+        """Backups the server made of a model file (a .lir path or an open model; default
+        the active one), newest first. They lie in the lira-mcp-backups folder next to
+        the model; the server never deletes them."""
+        path = await file_of(model)
+        return {"model": path, "backups": session.backups.of(path)}
+
+    @mcp.tool(annotations=ToolAnnotations(destructiveHint=True))
+    @lira_errors
+    async def lira_restore_backup(
+        model: str | None = None, backup: str | None = None, discard_changes: bool = False
+    ) -> dict[str, Any]:
+        """Put a backup (path from lira_list_backups; default the newest) back in place of
+        the model file. The current file is backed up first, so restoring the newest
+        backup again undoes this. An open model is closed and opened again; it must have
+        no unsaved changes unless discard_changes is true. Analysis results in LIRA's work
+        folder still belong to the replaced version: analyse again.
+        """
+        path = await file_of(model)
+        docs = await session.run(session.adapter.list_documents)
+        doc = next((d for d in docs if d.path and norm_path(d.path) == norm_path(path)), None)
+        if doc is not None:
+            if doc.modified and not discard_changes:
+                raise LiraInputError(
+                    f"{doc.title} has unsaved changes: save them first (they are then backed "
+                    "up as well) or pass discard_changes=true"
+                )
+            await session.run(session.adapter.close_document, doc.path, True)
+        restored = session.backups.restore(path, backup)
+        if doc is not None:
+            await session.run(session.adapter.open_document, path)
+        return {"model": path, "reopened": doc is not None, **restored}
 
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors
