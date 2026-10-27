@@ -52,6 +52,16 @@ def lira(tmp_path):
     return adapter, doc
 
 
+def test_the_real_adapter_has_every_method_the_fake_one_has():
+    import inspect
+
+    from fakes import FakeAdapter
+
+    fake = {n for n, _ in inspect.getmembers(FakeAdapter, inspect.isfunction)}
+    real = {n for n, _ in inspect.getmembers(ComLiraAdapter, inspect.isfunction)}
+    assert {n for n in fake if not n.startswith("_")} - real == set()
+
+
 def read(adapter, doc):
     with adapter._reading(doc):
         doc.modified = True  # LIRA marks a document modified by a scratch table

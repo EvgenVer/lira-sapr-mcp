@@ -118,7 +118,21 @@ def summarize(
     return result
 
 
-_KEYS = ("node", "element", "case", "shape", "section")
+# Where a value is: kept in every row shown and in the place of each extreme.
+_KEYS = (
+    "node",
+    "element",
+    "case",
+    "combination",
+    "shape",
+    "section",
+    "limit_state",
+    "dcf",
+    "criterion",
+    "group",
+    "load_cases",
+    "with",
+)
 
 
 def _where(row: dict) -> dict:

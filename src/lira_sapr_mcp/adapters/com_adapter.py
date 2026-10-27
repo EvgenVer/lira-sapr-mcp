@@ -474,6 +474,35 @@ class ComLiraAdapter:
     ) -> list[dict]:
         return self.results.element_forces(model_path, elements, cases, families)
 
+    def load_combinations(self, model_path: str) -> dict[str, Any]:
+        return self.results.load_combinations(model_path)
+
+    def combination_displacements(
+        self, model_path: str, nodes: list[int] | None, combinations: list[int] | None
+    ) -> list[dict]:
+        return self.results.combination_displacements(model_path, nodes, combinations)
+
+    def combination_forces(
+        self,
+        model_path: str,
+        elements: list[int] | None,
+        combinations: list[int] | None,
+        families: list[str] | None = None,
+        limit_states: list[int] | None = None,
+    ) -> list[dict]:
+        return self.results.combination_forces(
+            model_path, elements, combinations, families, limit_states
+        )
+
+    def design_forces(
+        self,
+        model_path: str,
+        elements: list[int] | None,
+        families: list[str] | None = None,
+        limit_states: list[int] | None = None,
+    ) -> list[dict]:
+        return self.results.design_forces(model_path, elements, families, limit_states)
+
     # --- units ----------------------------------------------------------------------
 
     def units(self) -> Units:

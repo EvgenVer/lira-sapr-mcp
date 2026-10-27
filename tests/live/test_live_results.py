@@ -89,6 +89,37 @@ async def test_results_of_a_model_never_analysed(mcp, workdir):
     async with Client(mcp) as client:
         res = await client.call_tool("lira_element_forces", {"model": path})
     assert res.is_error and "No analysis results" in res.content[0].text
+    assert "run lira_run_analysis" in res.content[0].text
+
+
+EXAMPLE_01 = (
+    Path(r"C:\Users\Public\Documents\LIRA SAPR\LIRA SAPR 2024\Manual\RU")
+    / "01_плоская рама ЖБ"
+    / "01_2D рама ЖБ.lir"
+)
+
+
+async def test_design_forces_and_missing_combinations_of_example_01(mcp, workdir):
+    """Frame 01 has design combinations (DCF) but no load combinations (DCL)."""
+    if not EXAMPLE_01.exists():
+        pytest.skip("LIRA example models are not installed")
+    path = str(workdir / "lmcp_ex01.lir")
+    shutil.copy(EXAMPLE_01, path)
+    async with Client(mcp) as client:
+        await client.call_tool("lira_open_model", {"path": path})
+        status = await analyse_open(client, path)
+        assert status["status"] == "finished", status
+        design = await client.call_tool(
+            "lira_design_forces", {"model": path, "elements": [1], "limit_states": [1]}
+        )
+        dcl = await client.call_tool("lira_combination_forces", {"model": path})
+    assert not design.is_error, design.content
+    bar = design.structured_content["families"]["bar"]
+    assert bar["total_rows"] >= 5
+    first = bar["rows"][0]
+    assert first["limit_state"] == "ultimate" and first["group"] in ("A1", "B1", "C1", "D1")
+    assert first["load_cases"]
+    assert dcl.is_error and "load combinations (input table DCL)" in dcl.content[0].text
 
 
 EXAMPLE_04 = (
@@ -115,7 +146,21 @@ async def test_plates_and_dynamic_shapes_of_example_04(mcp, workdir):
         moved = await client.call_tool(
             "lira_node_displacements", {"model": path, "nodes": "100", "load_cases": [4]}
         )
+        listed = await client.call_tool("lira_load_combinations", {"model": path})
+        dcl_forces = await client.call_tool(
+            "lira_combination_forces",
+            {"model": path, "elements": "1", "combinations": [1], "limit_states": [1]},
+        )
+        dcl_moved = await client.call_tool(
+            "lira_combination_displacements", {"model": path, "nodes": "2"}
+        )
     assert not forces.is_error, forces.content
+    combos = listed.structured_content
+    assert combos["code"] == "SP" and len(combos["combinations"]) == 3
+    assert [c["seismic"] for c in combos["combinations"]] == [False, True, True]
+    bar = dcl_forces.structured_content["families"]["bar"]
+    assert bar["total_rows"] == 2  # two design sections
+    assert dcl_moved.structured_content["total_rows"] == 3
     families = forces.structured_content["families"]
     assert set(families) >= {"bar", "plate"}
     plate = families["plate"]

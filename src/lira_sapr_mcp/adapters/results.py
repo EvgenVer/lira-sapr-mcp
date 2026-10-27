@@ -55,6 +55,22 @@ FORCES = {
 }  # fmt: skip
 
 
+# LiraLimitStateForcesEnum: ultimate / serviceability, full or long-term loads.
+LIMIT_STATES = {1: "ultimate", 2: "ultimate_long", 3: "serviceability", 4: "serviceability_long"}
+# LiraInternalGroupsEnum: DCF groups as LIRA names them.
+GROUPS = {1: "A1", 2: "B1", 3: "C1", 4: "D1", 5: "A2", 6: "B2", 7: "C2", 8: "D2", 9: "E1"}
+CRANE_SEISMIC = {1: "crane", 2: "seismic", 3: "crane+seismic"}
+COMBINATION_CODES = {
+    0: "SNiP", 1: "Eurocode", 2: "ACI", 3: "BAEL", 4: "IBC", 5: "DBN", 6: "STB EN", 7: "SP",
+    8: "SP RK EN", 9: "TKP EN", 10: "EN",
+}  # fmt: skip
+NO_DCL = "set load combinations (input table DCL) and run lira_run_analysis"
+NO_DCF = (
+    "set design combinations of forces (DCF: document 8 of the text format or LIRA's DCF "
+    "dialog) and run lira_run_analysis"
+)
+
+
 def force_kinds(family: str) -> dict[str, str]:
     """Unit kind of each component of a family, e.g. {"N": "force", "My": "moment"}."""
     code = next(c for c, (name, _) in FAMILIES.items() if name == family)
@@ -87,7 +103,15 @@ class ResultsReader:
     def close(self) -> None:
         self._c = None
 
-    def _query(self, model_path: str, kind: str, iface: str, method: str, fill: Any = None):
+    def _query(
+        self,
+        model_path: str,
+        kind: str,
+        iface: str,
+        method: str,
+        fill: Any = None,
+        missing: str = "run lira_run_analysis for this model first",
+    ):
         import win32com.client
 
         access = self._access()
@@ -100,8 +124,7 @@ class ResultsReader:
         except Exception as exc:
             if _scode(exc) == NO_RESULTS_HRESULT:
                 raise LiraInputError(
-                    f"No analysis results for {Path(model_path).stem!r}: run "
-                    "lira_run_analysis for this model first"
+                    f"No analysis results of this kind for {Path(model_path).stem!r}: {missing}"
                 ) from exc
             raise LiraComError(
                 f"Reading results of {Path(model_path).stem!r} failed: {exc}"
@@ -146,11 +169,7 @@ class ResultsReader:
     ) -> list[dict]:
         """Forces and stresses per element, load case, shape and design section; each row
         names its element family, since components differ between families."""
-        if not elements:
-            main = self._query(
-                model_path, "kLiraRequest_MainData", "ILiraMainDataRequest", "MainData"
-            )
-            elements = list(range(1, main.GetElementCount() + 1))
+        elements = self._elements(model_path, elements)
         wanted = " ".join(map(str, elements))
         resp = self._query(
             model_path,
@@ -163,20 +182,15 @@ class ResultsReader:
         getters: dict[int, Any] = {}
         rows = []
         for el in elements:
-            family = FAMILIES.get(int(resp.GetFamily(el)))
-            if family is None or (families and family[0] not in families):
+            found = _components(resp, el, families, getters)
+            if found is None:
                 continue
-            components = []
-            for code in _numbers(resp.GetForces(el).AddToString()):
-                if code in FORCES:
-                    if code not in getters:
-                        getters[code] = getattr(resp, family[1] + FORCES[code][1])
-                    components.append((FORCES[code][1], getters[code]))
+            family, components = found
             sections = resp.GetSectionCount(el)
             for case, modes in shapes:
                 for position, mode in modes:
                     for section in range(1, sections + 1):
-                        row: dict[str, Any] = {"family": family[0], "element": el, "case": case}
+                        row: dict[str, Any] = {"family": family, "element": el, "case": case}
                         if len(modes) > 1:
                             row["shape"] = mode
                         row["section"] = section
@@ -184,6 +198,200 @@ class ResultsReader:
                             row[name] = float(get(el, section, case, position, 0))
                         rows.append(row)
         return rows
+
+    def _elements(self, model_path: str, elements: list[int] | None) -> list[int]:
+        if elements:
+            return elements
+        main = self._query(model_path, "kLiraRequest_MainData", "ILiraMainDataRequest", "MainData")
+        return list(range(1, main.GetElementCount() + 1))
+
+    def load_combinations(self, model_path: str) -> dict[str, Any]:
+        """The load combinations (DCL) of the analysed model and their building code."""
+        resp = self._query(
+            model_path,
+            "kLiraRequest_LoadCombinationDisplacements",
+            "ILiraLoadCombinationDisplacementsRequest",
+            "LoadCombinationDisplacements",
+            lambda req: req.Nodes.AddFromString("1"),
+            missing=NO_DCL,
+        )
+        return _combination_infos(resp.LoadCombinations)
+
+    def combination_displacements(
+        self, model_path: str, nodes: list[int] | None, combinations: list[int] | None
+    ) -> list[dict]:
+        def fill(req: Any) -> None:
+            if nodes:
+                req.Nodes.AddFromString(" ".join(map(str, nodes)))
+
+        resp = self._query(
+            model_path,
+            "kLiraRequest_LoadCombinationDisplacements",
+            "ILiraLoadCombinationDisplacementsRequest",
+            "LoadCombinationDisplacements",
+            fill,
+            missing=NO_DCL,
+        )
+        chosen = _chosen(_combination_infos(resp.LoadCombinations), combinations)
+        directions = _numbers(resp.Directions.AddToString())
+        getters = {d: getattr(resp, f"GetNode{name}") for d, name in DISPLACEMENTS.items()}
+        rows = []
+        for node in _numbers(resp.NodeNumbers.AddToString()):
+            for dcl in chosen:
+                row: dict[str, Any] = {"node": node, "combination": dcl}
+                for d in directions:
+                    if d in getters:
+                        row[DISPLACEMENTS[d]] = float(getters[d](node, dcl))
+                rows.append(row)
+        return rows
+
+    def combination_forces(
+        self,
+        model_path: str,
+        elements: list[int] | None,
+        combinations: list[int] | None,
+        families: list[str] | None = None,
+        limit_states: list[int] | None = None,
+    ) -> list[dict]:
+        """Forces in load combinations (DCL) per element, combination, limit state and
+        design section."""
+        elements = self._elements(model_path, elements)
+        wanted = " ".join(map(str, elements))
+        resp = self._query(
+            model_path,
+            "kLiraRequest_LoadCombinationForces",
+            "ILiraLoadCombinationForcesRequest",
+            "LoadCombinationForces",
+            lambda req: req.Elements.AddFromString(wanted),
+            missing=NO_DCL,
+        )
+        chosen = _chosen(_combination_infos(resp.LoadCombinations), combinations)
+        states = _limit_states(limit_states)
+        getters: dict[int, Any] = {}
+        rows = []
+        for el in elements:
+            found = _components(resp, el, families, getters)
+            if found is None:
+                continue
+            family, components = found
+            sections = resp.GetSectionCount(el)
+            for dcl in chosen:
+                for ls in states:
+                    for section in range(1, sections + 1):
+                        row: dict[str, Any] = {
+                            "family": family,
+                            "element": el,
+                            "combination": dcl,
+                            "limit_state": LIMIT_STATES[ls],
+                            "section": section,
+                        }
+                        for name, get in components:
+                            row[name] = float(get(el, section, dcl, ls))
+                        rows.append(row)
+        return rows
+
+    def design_forces(
+        self,
+        model_path: str,
+        elements: list[int] | None,
+        families: list[str] | None = None,
+        limit_states: list[int] | None = None,
+    ) -> list[dict]:
+        """Design combinations of forces (DCF) per element, design section, limit state
+        and combination, with the criterion and the load cases that formed each one."""
+        elements = self._elements(model_path, elements)
+        wanted = " ".join(map(str, elements))
+        resp = self._query(
+            model_path,
+            "kLiraRequest_DesignCombinationForces",
+            "ILiraDesignCombinationForcesRequest",
+            "DesignCombinationForces",
+            lambda req: req.Elements.AddFromString(wanted),
+            missing=NO_DCF,
+        )
+        states = _limit_states(limit_states)
+        getters: dict[int, Any] = {}
+        rows = []
+        for el in elements:
+            found = _components(resp, el, families, getters)
+            if found is None:
+                continue
+            family, components = found
+            for section in range(1, resp.GetSectionCount(el) + 1):
+                for ls in states:
+                    for k in range(1, resp.GetDCLCount(el, section, ls) + 1):
+                        row: dict[str, Any] = {
+                            "family": family,
+                            "element": el,
+                            "section": section,
+                            "limit_state": LIMIT_STATES[ls],
+                            "dcf": k,
+                            "criterion": int(resp.GetCriterionNumber(el, section, ls, k)),
+                            "group": GROUPS.get(int(resp.GetInternalGroup(el, section, ls, k))),
+                            "load_cases": str(resp.GetLoadCases(el, section, ls, k).AddToString()),
+                        }
+                        flag = int(resp.GetCraneEarthquakeFlag(el, section, ls, k))
+                        if flag:
+                            row["with"] = CRANE_SEISMIC[flag]
+                        for name, get in components:
+                            row[name] = float(get(el, section, ls, k))
+                        rows.append(row)
+        return rows
+
+
+def _components(
+    resp: Any, el: int, families: list[str] | None, cache: dict[int, Any]
+) -> tuple[str, list[tuple[str, Any]]] | None:
+    """The family of an element and (component, getter) for each force it has; None for
+    elements outside ``families`` or of an unknown family."""
+    family = FAMILIES.get(int(resp.GetFamily(el)))
+    if family is None or (families and family[0] not in families):
+        return None
+    components = []
+    for code in _numbers(resp.GetForces(el).AddToString()):
+        if code in FORCES and FAMILIES[FORCES[code][0]] == family:
+            if code not in cache:
+                cache[code] = getattr(resp, family[1] + FORCES[code][1])
+            components.append((FORCES[code][1], cache[code]))
+    return family[0], components
+
+
+def _combination_infos(infos: Any) -> dict[str, Any]:
+    code = int(infos.Code)
+    return {
+        "code": COMBINATION_CODES.get(code, code),
+        "combinations": [
+            {
+                "number": int(it.Number),
+                "name": str(it.Name),
+                "formula": int(it.FormulaNumber),
+                "special": bool(it.IsSpecial),
+                "seismic": bool(it.IsSeismic),
+            }
+            for it in (infos.Item(i) for i in range(infos.Count))
+        ],
+    }
+
+
+def _chosen(infos: dict[str, Any], wanted: list[int] | None) -> list[int]:
+    available = [c["number"] for c in infos["combinations"]]
+    if not available:
+        raise LiraInputError(f"The model has no load combinations (DCL). {NO_DCL}")
+    if wanted is None:
+        return available
+    missing = sorted(set(wanted) - set(available))
+    if missing:
+        raise LiraInputError(f"No load combinations {missing}; available: {available}")
+    return [c for c in available if c in wanted]
+
+
+def _limit_states(wanted: list[int] | None) -> list[int]:
+    if wanted is None:
+        return list(LIMIT_STATES)
+    bad = sorted(set(wanted) - set(LIMIT_STATES))
+    if bad:
+        raise LiraInputError(f"Unknown limit states {bad}: use {LIMIT_STATES}")
+    return sorted(set(wanted))
 
 
 def _scode(exc: Exception) -> int | None:

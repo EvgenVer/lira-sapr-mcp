@@ -140,6 +140,29 @@ class FakeAdapter:
             for n in nodes or [1, 2]
         ]
 
+    # Two load combinations; one design combination per limit state of bar 1.
+    def load_combinations(self, model_path):
+        names = [{"number": n, "name": f"DCL{n}", "formula": 1, "special": False,
+                  "seismic": False} for n in (1, 2)]  # fmt: skip
+        return {"code": "SP", "combinations": names}
+
+    def combination_displacements(self, model_path, nodes, combinations):
+        return [{"node": 2, "combination": c, "Z": -0.001 * c} for c in combinations or [1, 2]]
+
+    def combination_forces(self, model_path, elements, combinations, families, limit_states):
+        return [
+            {"family": "bar", "element": 1, "combination": c, "limit_state": "ultimate",
+             "section": 1, "My": -1.0 * c}
+            for c in combinations or [1, 2]
+        ]  # fmt: skip
+
+    def design_forces(self, model_path, elements, families, limit_states):
+        return [
+            {"family": "bar", "element": 1, "section": 1, "limit_state": "ultimate", "dcf": 1,
+             "criterion": 2, "group": "A1", "load_cases": "1-3,-4", "with": "seismic",
+             "N": -2.0, "My": 1.0}
+        ]  # fmt: skip
+
     def units(self):
         return Units("m", "cm", "kN", "m", "kN", "m2", "mm", "kN", "m", "kN", "m2", "C")
 

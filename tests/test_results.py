@@ -127,6 +127,30 @@ async def test_missing_results_say_what_to_do(tmp_path):
     assert res.is_error and "No analysis results" in res.content[0].text
 
 
+@pytest.mark.anyio
+async def test_combination_tools(tmp_path):
+    session, _ = fake_session(tmp_path)
+    model = str(tmp_path / "frame.lir")
+    async with Client(build_server(session)) as client:
+        listed = await client.call_tool("lira_load_combinations", {"model": model})
+        moved = await client.call_tool(
+            "lira_combination_displacements", {"model": model, "sort_by": "Z"}
+        )
+        forces = await client.call_tool(
+            "lira_combination_forces", {"model": model, "combinations": [2]}
+        )
+        design = await client.call_tool("lira_design_forces", {"model": model})
+    assert [c["name"] for c in listed.structured_content["combinations"]] == ["DCL1", "DCL2"]
+    assert moved.structured_content["rows"][0] == {"node": 2, "combination": 2, "Z": -2.0}
+    bar = forces.structured_content["families"]["bar"]
+    assert bar["extremes"]["My"]["min"]["at"] == {
+        "element": 1, "combination": 2, "section": 1, "limit_state": "ultimate"
+    }  # fmt: skip
+    (row,) = design.structured_content["families"]["bar"]["rows"]
+    assert row["load_cases"] == "1-3,-4" and row["group"] == "A1" and row["with"] == "seismic"
+    assert row["N"] == pytest.approx(-19.6133)
+
+
 def test_no_results_code_is_read_from_com_exception_info():
     from lira_sapr_mcp.adapters.results import NO_RESULTS_HRESULT, _scode
 

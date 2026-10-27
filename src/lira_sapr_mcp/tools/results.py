@@ -122,6 +122,115 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
             families,
             timeout=session.settings.call_timeout_s * 5,
         )
+        return await forces_answer(path, rows, components, sort_by, by_abs, top)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_load_combinations(model: str | None = None) -> dict[str, Any]:
+        """Load combinations (DCL, РСН) of an analysed model: number, name, formula,
+        special and seismic flags, and the building code they follow."""
+        path = await model_path(model)
+        return {"model": path} | await session.run(session.adapter.load_combinations, path)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_combination_displacements(
+        model: str | None = None,
+        nodes: list[int] | str | None = None,
+        combinations: list[int] | None = None,
+        components: list[str] | None = None,
+        sort_by: str | None = None,
+        by_abs: bool = True,
+        top: int | None = 20,
+    ) -> dict[str, Any]:
+        """Node displacements in load combinations (DCL, РСН) after lira_run_analysis.
+
+        combinations: numbers from lira_load_combinations (default all). Other arguments
+        and the answer as in lira_node_displacements, with "combination" in place of
+        "case".
+        """
+        path = await model_path(model)
+        rows = await session.run(
+            session.adapter.combination_displacements, path, parse_numbers(nodes), combinations
+        )
+        u = await session.run(session.adapter.units)
+        return await answer(
+            path, rows, rs.DISPLACEMENT_KIND, {"length": u.displacements}, components, sort_by,
+            by_abs, top,
+        )  # fmt: skip
+
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_combination_forces(
+        model: str | None = None,
+        elements: list[int] | str | None = None,
+        combinations: list[int] | None = None,
+        limit_states: list[int] | None = None,
+        families: list[str] | None = None,
+        components: list[str] | None = None,
+        sort_by: str | None = None,
+        by_abs: bool = True,
+        top: int | None = 20,
+    ) -> dict[str, Any]:
+        """Internal forces and stresses in load combinations (DCL, РСН).
+
+        limit_states: 1 ultimate, 2 ultimate with long-term loads, 3 serviceability,
+        4 serviceability with long-term loads (default all). One row per element,
+        combination, limit state and design section. Other arguments and the answer as in
+        lira_element_forces.
+        """
+        path = await model_path(model)
+        rows = await session.run(
+            session.adapter.combination_forces,
+            path,
+            parse_numbers(elements),
+            combinations,
+            families,
+            limit_states,
+            timeout=session.settings.call_timeout_s * 5,
+        )
+        return await forces_answer(path, rows, components, sort_by, by_abs, top)
+
+    @mcp.tool(annotations=READ_ONLY)
+    @lira_errors
+    async def lira_design_forces(
+        model: str | None = None,
+        elements: list[int] | str | None = None,
+        limit_states: list[int] | None = None,
+        families: list[str] | None = None,
+        components: list[str] | None = None,
+        sort_by: str | None = None,
+        by_abs: bool = True,
+        top: int | None = 20,
+    ) -> dict[str, Any]:
+        """Design combinations of forces (DCF, РСУ) after lira_run_analysis.
+
+        One row per element, design section, limit state (as in lira_combination_forces)
+        and combination "dcf", with its criterion number, internal group (A1, B1, ...),
+        "load_cases" that form it (LIRA's notation: "1-3,-4" = cases 1 to 3 and case 4
+        with the opposite sign) and "with": crane and/or seismic when included. Other
+        arguments and the answer as in lira_element_forces.
+        """
+        path = await model_path(model)
+        rows = await session.run(
+            session.adapter.design_forces,
+            path,
+            parse_numbers(elements),
+            families,
+            limit_states,
+            timeout=session.settings.call_timeout_s * 5,
+        )
+        return await forces_answer(path, rows, components, sort_by, by_abs, top)
+
+    async def forces_answer(
+        path: str,
+        rows: list[dict],
+        components: list[str] | None,
+        sort_by: str | None,
+        by_abs: bool,
+        top: int | None,
+    ) -> dict[str, Any]:
+        """Convert and reduce force rows separately for each element family."""
         u = await session.run(session.adapter.units)
         units = {
             "force": u.forces,
