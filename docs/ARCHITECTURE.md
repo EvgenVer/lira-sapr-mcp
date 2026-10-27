@@ -1,6 +1,6 @@
 # Архитектура — Lira-Sapr-MCP
 
-Status: draft
+Status: approved 2026-10-27
 
 ## Общая картина
 

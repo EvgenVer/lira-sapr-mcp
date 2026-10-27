@@ -15,7 +15,7 @@ flowchart LR
 ## Где мы сейчас
 
 - Продукт описан и утверждён — [PRODUCT.md](PRODUCT.md).
-- Архитектура предложена — [ARCHITECTURE.md](ARCHITECTURE.md), ждёт утверждения.
+- Архитектура утверждена — [ARCHITECTURE.md](ARCHITECTURE.md).
 - Кода пока нет; план — [TASKS.md](TASKS.md), этап 1: тонкий сквозной путь.
 
 ## С чего начать чтение
