@@ -106,8 +106,10 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         LIRA has no API for loads, so the server rebuilds the model through LIRA's text
         format, copies every input table back, verifies tables and loads, and only then
         overwrites the file (after a backup). If verification fails, nothing changes.
-        Data that is neither in input tables nor in the text format cannot be verified:
-        check the model in LIRA after this call.
+        Models whose combination norms differ from those LIRA gives a model rebuilt from
+        text are refused: the rebuild would change their load case kinds. Data that is
+        neither in input tables nor in the text format cannot be verified: check the
+        model in LIRA after this call.
         """
         ref = await session.resolve(model)
         try:

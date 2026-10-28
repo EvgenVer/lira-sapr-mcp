@@ -77,6 +77,19 @@ def _same_loads(a: list[Load], b: list[Load]) -> bool:
     return sorted(map(key, a)) == sorted(map(key, b))
 
 
+def _changed_kinds(before: list | None, now: list) -> list[str]:
+    """Load case kinds (column 4 of LoadCases) that the rebuild changed, as 'old -> new'.
+
+    The text import gives the model LIRA's default combination norms, and LIRA maps
+    written kinds into the dictionary of those norms, so restoring LoadCases cannot undo
+    it: compare right after the import.
+    """
+    old = {row[0]: row[3] for row in before or []}
+    return [
+        f"{row[0]}: {old[row[0]]} -> {row[3]}" for row in now if old.get(row[0], row[3]) != row[3]
+    ]
+
+
 def set_loads(adapter: Any, ref: str, loads: list[Load], cases: list[int] | None) -> dict[str, Any]:
     """Replace the loads of ``cases`` (all cases when None) in a saved model."""
     orig = adapter.document_info(ref)
@@ -97,6 +110,14 @@ def set_loads(adapter: Any, ref: str, loads: list[Load], cases: list[int] | None
     new = _import_text(adapter, model.render(), orig.title)
     new_ref = new.path or new.title
     try:
+        kinds = _changed_kinds(before.get("LoadCases"), adapter.read_table(new_ref, "LoadCases"))
+        if kinds:
+            raise LiraError(
+                "Loads were not changed: this model uses combination norms other than the "
+                "ones LIRA gives a model rebuilt from text, so the rebuild would change load "
+                f"case kinds ({'; '.join(kinds)}). LIRA 2024 R2's API cannot keep them; "
+                "change these loads in LIRA itself. The original model is untouched."
+            )
         restored, failed = [], {}
         for name, rows in before.items():
             if rows is None:

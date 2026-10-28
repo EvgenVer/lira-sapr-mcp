@@ -103,8 +103,11 @@ def test_mismatching_rebuild_is_refused_and_original_untouched(lira, adapter, ex
         if ld.case == 1
     ]
 
-    with pytest.raises(LiraError, match="original model is untouched"):
+    with pytest.raises(LiraError, match="combination norms") as err:
         lira(loads_service.set_loads, adapter, str(example), changed, [1])
+
+    assert "Мгновенное(М) -> Особое ( Ps)" in str(err.value)
+    assert "original model is untouched" in str(err.value)
 
     assert example.read_bytes() == original_bytes
     assert as_loads(lira(loads_service.read_loads, adapter, str(example))) == original
