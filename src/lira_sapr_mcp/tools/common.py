@@ -2,7 +2,7 @@
 
 import functools
 from collections.abc import Awaitable, Callable
-from typing import Any, ParamSpec, TypeVar
+from typing import Any
 
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -15,11 +15,8 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True)
 # connected LIRA release cannot run.
 REQUIRES: dict[str, tuple[str, ...]] = {}
 
-P = ParamSpec("P")
-R = TypeVar("R")
 
-
-def lira_errors(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+def lira_errors[**P, R](fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
     """Report LIRA errors to the agent as plain tool errors instead of tracebacks."""
 
     @functools.wraps(fn)
@@ -55,10 +52,10 @@ async def backup_before_change(session: Any, ref: str) -> str | None:
 
 
 # --8<-- [start:needs]
-def needs(session: Any, *capabilities: str) -> Callable[[Callable[P, Awaitable[R]]], Any]:
+def needs(session: Any, *capabilities: str) -> Callable[[Callable[..., Awaitable[Any]]], Any]:
     """Refuse a tool clearly when this LIRA release lacks an API function it needs."""
 
-    def wrap(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    def wrap[**P, R](fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         REQUIRES[fn.__name__] = capabilities
 
         @functools.wraps(fn)

@@ -24,6 +24,16 @@ async def test_a_tool_whose_api_function_is_missing_is_refused_before_it_runs(tm
     assert status.structured_content["tools_this_lira_cannot_run"] == ["lira_run_analysis"]
 
 
+async def test_the_first_guarded_call_connects_to_learn_the_capabilities(tmp_path):
+    session, adapter = fake_session(tmp_path)
+    adapter.capabilities = adapter.capabilities - {"StartAnalysis"}
+    assert not adapter.connected
+    async with Client(build_server(session)) as client:
+        refused = await client.call_tool("lira_run_analysis", {})
+        assert adapter.connected  # the session disconnects when the server stops
+    assert refused.is_error and "needs StartAnalysis" in refused.content[0].text
+
+
 async def test_a_full_lira_lists_no_unavailable_tools(tmp_path):
     session, _ = fake_session(tmp_path)
     async with Client(build_server(session)) as client:

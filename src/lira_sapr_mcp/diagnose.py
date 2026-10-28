@@ -87,6 +87,10 @@ def _safe(fn: Callable[[], str | None]) -> str:
 
 
 def write_report(path: Path | None = None) -> Path:
-    target = path or Path.cwd() / f"lira-sapr-mcp-diagnose-{datetime.now():%Y%m%d-%H%M}.md"
+    """Write the report to ``path``: a file, or a folder for the default file name."""
+    name = f"lira-sapr-mcp-diagnose-{datetime.now():%Y%m%d-%H%M}.md"
+    target = path or Path.cwd()
+    if target.is_dir():
+        target = target / name
     target.write_text(build_report(), encoding="utf-8")
     return target

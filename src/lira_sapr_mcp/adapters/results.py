@@ -27,8 +27,8 @@ log = logging.getLogger(__name__)
 NO_RESULTS_HRESULT = -2147418113
 
 # Results library of LIRA 2024 R2: used when a release's own is not registered.
-RES_TYPELIB = {2024: ("{BD6C09E6-B5EE-4DAB-8D61-C009BA755C46}", 1, 0)}
-RES_CLASS = {2024: "{4F4546AE-AC54-48A2-9414-1B9EF6519A37}"}
+RES_TYPELIB = ("{BD6C09E6-B5EE-4DAB-8D61-C009BA755C46}", 1, 0)
+RES_CLASS = "{4F4546AE-AC54-48A2-9414-1B9EF6519A37}"
 
 DISPLACEMENTS = {1: "X", 2: "Y", 3: "Z", 4: "UX", 5: "UY", 6: "UZ"}
 
@@ -134,17 +134,17 @@ class ResultsReader:
     def _choose_library(self) -> tuple[str, int, int, str]:
         """The release's own results library, else the one of LIRA 2024 R2."""
         if self._library is None:
-            guid, major, minor = RES_TYPELIB[2024]
-            cls = RES_CLASS[2024]
+            library = (*RES_TYPELIB, RES_CLASS)
             try:
                 own = results_library(self.install, registered_typelibs())
                 if own is not None:
-                    guid, (major, minor) = own.guid, own.major_minor
-                    cls = coclass_id(own.path, RESULTS_ACCESS) or cls
+                    cls = coclass_id(own.path, RESULTS_ACCESS)
+                    if cls:  # all four from one release, never a mix
+                        library = (own.guid, *own.major_minor, cls)
             except Exception as exc:  # registry or type library unreadable
                 log.warning("Results library of LIRA %s not found: %s", self.install.year, exc)
-            log.info("results library %s %d.%d, class %s", guid, major, minor, cls)
-            self._library = (guid, major, minor, cls)
+            log.info("results library %s %d.%d, class %s", *library)
+            self._library = library
         return self._library
 
     def _access(self) -> Any:

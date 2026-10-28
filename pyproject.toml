@@ -6,7 +6,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Evgenii Veremev" }]
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 keywords = ["mcp", "lira-sapr", "lira-fem", "fem", "structural-analysis"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -14,6 +14,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
@@ -47,7 +48,7 @@ packages = ["src/lira_sapr_mcp"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py313"
 src = ["src", "tests"]
 # spikes: throwaway experiments against live LIRA. docs: code blocks there embed source
 # files by snippet markers, which the formatter would mangle.

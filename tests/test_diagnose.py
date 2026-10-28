@@ -1,5 +1,6 @@
 """The diagnose report and the choice of each release's results library."""
 
+from lira_sapr_mcp.adapters import results
 from lira_sapr_mcp.adapters.discovery import LiraInstall
 from lira_sapr_mcp.adapters.typelibs import TypeLib, install_root, results_library
 from lira_sapr_mcp.diagnose import build_report
@@ -49,6 +50,31 @@ def test_each_release_gets_the_results_library_from_its_own_folder():
 
 def test_no_results_library_of_its_own_gives_none():
     assert results_library(LIRA_2026, [APP_2024, RES_2024]) is None
+
+
+def test_a_sibling_folder_with_a_longer_name_is_not_the_release_folder():
+    folder = r"C:\Program Files (x86)\LIRA SAPR\LIRA SAPR 2024 R3\Bin"
+    sibling = TypeLib(RES_2026.guid, "1.0", "LiraSaprRes", folder + r"\LiraResAPI.dll")
+    assert results_library(LIRA_2024, [sibling]) is None
+    upper = TypeLib(RES_2024.guid, "1.0", "LiraSaprRes", RES_2024.path.upper())
+    assert results_library(LIRA_2024, [upper]) == upper  # Windows paths ignore case
+
+
+def test_results_reader_uses_the_releases_own_library(monkeypatch):
+    monkeypatch.setattr(results, "registered_typelibs", lambda: [RES_2026])
+    monkeypatch.setattr(results, "coclass_id", lambda path, name: "{CLASS-2026}")
+    chosen = results.ResultsReader(LIRA_2026)._choose_library()
+    assert chosen == (RES_2026.guid, 2, 10, "{CLASS-2026}")
+
+
+def test_results_reader_never_mixes_two_releases(monkeypatch):
+    def unreadable(path, name):
+        raise OSError("cannot load the type library")
+
+    monkeypatch.setattr(results, "registered_typelibs", lambda: [RES_2026])
+    monkeypatch.setattr(results, "coclass_id", unreadable)
+    chosen = results.ResultsReader(LIRA_2026)._choose_library()
+    assert chosen == (*results.RES_TYPELIB, results.RES_CLASS)  # all of 2024 R2
 
 
 def test_report_names_installs_folders_libraries_and_their_contents():

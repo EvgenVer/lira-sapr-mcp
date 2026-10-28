@@ -40,7 +40,7 @@ uv run lira-sapr-mcp --version
 Claude Code:
 
 ```bash
-claude mcp add lira-sapr -- uv --directory "D:\my program\Lira-Sapr-MCP" run lira-sapr-mcp
+claude mcp add lira-sapr -- uv --directory "C:\path\to\lira-sapr-mcp" run lira-sapr-mcp
 ```
 
 Codex — в файле `%USERPROFILE%\.codex\config.toml`:
@@ -48,7 +48,7 @@ Codex — в файле `%USERPROFILE%\.codex\config.toml`:
 ```toml
 [mcp_servers.lira-sapr]
 command = "uv"
-args = ["--directory", "D:\\my program\\Lira-Sapr-MCP", "run", "lira-sapr-mcp"]
+args = ["--directory", "C:\\path\\to\\lira-sapr-mcp", "run", "lira-sapr-mcp"]
 ```
 
 Клиенты с JSON-настройкой (Claude Desktop, Cursor и другие):
@@ -58,7 +58,7 @@ args = ["--directory", "D:\\my program\\Lira-Sapr-MCP", "run", "lira-sapr-mcp"]
   "mcpServers": {
     "lira-sapr": {
       "command": "uv",
-      "args": ["--directory", "D:\\my program\\Lira-Sapr-MCP", "run", "lira-sapr-mcp"]
+      "args": ["--directory", "C:\\path\\to\\lira-sapr-mcp", "run", "lira-sapr-mcp"]
     }
   }
 }
@@ -130,7 +130,8 @@ uv run lira-sapr-mcp --diagnose
 
 Команда не запускает ЛИРУ: она читает реестр Windows и файлы библиотек типов (описаний
 COM API) установленных ЛИР и пишет отчёт `lira-sapr-mcp-diagnose-<дата>.md` в текущую
-папку (другой путь — аргументом после `--diagnose`). В отчёте: найденные версии и какая
+папку (другая папка или файл — аргументом после `--diagnose`; неизвестный флаг
+останавливает программу с подсказкой, `--help` перечисляет флаги). В отчёте: найденные версии и какая
 выбрана, папки ЛИРЫ, библиотека результатов каждой версии и полный список интерфейсов,
 методов и констант API. По нему разработчик видит, что изменилось в ЛИРЕ 2025 или 2026.
 Отчёт содержит пути папок (в них может быть имя пользователя Windows) — посмотрите его,

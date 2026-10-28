@@ -6,13 +6,10 @@ registered as ``LiraSaprRes``). Each release keeps its files in its own folder, 
 results library of a release is the registered one whose file lies in that folder.
 """
 
-import logging
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from lira_sapr_mcp.adapters.discovery import LiraInstall
-
-log = logging.getLogger(__name__)
 
 NAME_MARKS = ("lira", "sapr", "sapphire")
 RESULTS_ACCESS = "LiraResultsAccess"
@@ -74,11 +71,11 @@ def install_root(install: LiraInstall) -> Path:
 
 def results_library(install: LiraInstall, libraries: list[TypeLib]) -> TypeLib | None:
     """The results library of ``install``: registered from that release's folder."""
-    root = str(install_root(install)).lower()
+    root = PureWindowsPath(install_root(install))  # compares case-insensitively
     own = [
         lib
         for lib in libraries
-        if "res" in lib.name.lower() and str(Path(lib.path)).lower().startswith(root)
+        if "res" in lib.name.lower() and PureWindowsPath(lib.path).is_relative_to(root)
     ]
     return max(own, key=lambda lib: lib.major_minor) if own else None
 

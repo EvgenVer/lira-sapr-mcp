@@ -11,6 +11,7 @@ Everything here runs on the COM thread.
   model stays untouched.
 """
 
+import contextlib
 import logging
 import shutil
 import tempfile
@@ -82,11 +83,13 @@ def _changed_kinds(before: list | None, now: list) -> list[str]:
 
     The text import gives the model LIRA's default combination norms, and LIRA maps
     written kinds into the dictionary of those norms, so restoring LoadCases cannot undo
-    it: compare right after the import.
+    it: compare right after the import. Rows without a kind are left to the full check.
     """
-    old = {row[0]: row[3] for row in before or []}
+    old = {row[0]: row[3] for row in before or [] if len(row) > 3}
     return [
-        f"{row[0]}: {old[row[0]]} -> {row[3]}" for row in now if old.get(row[0], row[3]) != row[3]
+        f"{row[0]}: {old[row[0]]} -> {row[3]}"
+        for row in now
+        if len(row) > 3 and old.get(row[0], row[3]) != row[3]
     ]
 
 
@@ -110,7 +113,12 @@ def set_loads(adapter: Any, ref: str, loads: list[Load], cases: list[int] | None
     new = _import_text(adapter, model.render(), orig.title)
     new_ref = new.path or new.title
     try:
-        kinds = _changed_kinds(before.get("LoadCases"), adapter.read_table(new_ref, "LoadCases"))
+        kinds = []
+        # If LIRA cannot build LoadCases, the full check below handles it as any table.
+        with contextlib.suppress(LiraError):
+            if before.get("LoadCases") is not None:
+                now = adapter.read_table(new_ref, "LoadCases")
+                kinds = _changed_kinds(before["LoadCases"], now)
         if kinds:
             raise LiraError(
                 "Loads were not changed: this model uses combination norms other than the "

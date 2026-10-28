@@ -1,7 +1,9 @@
 """Command-line entry point: ``lira-sapr-mcp`` runs the MCP server over stdio."""
 
+import argparse
 import logging
 import sys
+from pathlib import Path
 
 from lira_sapr_mcp import __version__
 
@@ -17,18 +19,40 @@ def setup_logging(log_file) -> None:
     )
 
 
-def main() -> None:
-    args = sys.argv[1:]
-    if "--version" in args:
-        print(f"lira-sapr-mcp {__version__}")
-        return
-    if "--diagnose" in args:
-        from pathlib import Path
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    # An unknown flag stops the program: a mistyped --no-scripts must not leave the
+    # script tool on unnoticed.
+    parser = argparse.ArgumentParser(
+        prog="lira-sapr-mcp",
+        description="MCP server for LIRA-SAPR over stdio; an MCP client starts it.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--version", action="version", version=f"lira-sapr-mcp {__version__}")
+    parser.add_argument(
+        "--no-scripts", action="store_true", help="leave out lira_run_script (the agent's Python)"
+    )
+    parser.add_argument(
+        "--diagnose",
+        nargs="?",
+        const="",
+        metavar="PATH",
+        help="write a report on the LIRA releases of this computer (file or folder; "
+        "default: the current folder) and exit; LIRA is not started",
+    )
+    return parser.parse_args(argv)
 
+
+def main() -> None:
+    args = parse_args(sys.argv[1:])
+    if args.diagnose is not None:
         from lira_sapr_mcp.diagnose import write_report
 
-        rest = args[args.index("--diagnose") + 1 :]
-        print(f"Report written to {write_report(Path(rest[0]) if rest else None)}")
+        try:
+            target = write_report(Path(args.diagnose) if args.diagnose else None)
+        except OSError as exc:
+            print(f"lira-sapr-mcp: Cannot write the report: {exc}", file=sys.stderr)
+            sys.exit(2)
+        print(f"Report written to {target}")
         return
     from lira_sapr_mcp.config import Settings, load_settings
     from lira_sapr_mcp.errors import LiraInputError
@@ -46,7 +70,7 @@ def main() -> None:
         sys.exit(2)
     setup_logging(settings.log_file)
     logging.getLogger(__name__).info("lira-sapr-mcp %s starting", __version__)
-    scripts = "--no-scripts" not in args
+    scripts = not args.no_scripts
     logging.getLogger(__name__).info("scripts %s", "on" if scripts else "off (--no-scripts)")
     build_server(LiraSession(settings), scripts=scripts).run("stdio")
 

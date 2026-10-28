@@ -1,5 +1,7 @@
 """T4 probe: GetContents return types, document indexing, units, empty-table behaviour."""
 
+from pathlib import Path
+
 import pythoncom
 import win32com.client
 from win32com.client import gencache
@@ -9,7 +11,7 @@ app = gencache.EnsureDispatch("LiraSapr.Application")
 c = win32com.client.constants
 while app.DocumentCount:
     app.Document(0).Close()
-doc = app.OpenDocument(r"D:\my program\Lira-Sapr-MCP\spikes\out\example01.lir", False, True)
+doc = app.OpenDocument(str(Path("spikes/out/example01.lir").resolve()), False, True)
 print("open returns:", type(doc), doc if isinstance(doc, tuple) else "")
 doc = doc[0] if isinstance(doc, tuple) else doc
 print("count", app.DocumentCount, "doc0", app.Document(0).Title, "active", app.ActiveDocument.PathName)
