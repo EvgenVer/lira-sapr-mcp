@@ -21,14 +21,18 @@ by lira_model_summary. A model argument is a .lir path or a model title; when om
 model active in LIRA is used. Files are backed up before the server first overwrites them.
 Results tools return extremes and the top rows only, converted to LIRA's current units.
 Table columns, FE type codes and the text format: resource lira://reference/tables.
-For anything no tool covers, lira_run_script runs Python with LIRA's COM objects.
 If a call times out, LIRA may wait in a dialog: see lira_dialogs.
 """
+SCRIPT_INSTRUCTIONS = (
+    "For anything no tool covers, lira_run_script runs Python with LIRA's COM objects.\n"
+)
 
 TABLES_REFERENCE = "lira://reference/tables"
 
 
-def build_server(session: LiraSession) -> MCPServer:
+def build_server(session: LiraSession, scripts: bool = True) -> MCPServer:
+    """``scripts=False`` (the --no-scripts flag) leaves out lira_run_script."""
+
     @asynccontextmanager
     async def lifespan(_: MCPServer) -> AsyncIterator[None]:
         try:
@@ -36,13 +40,15 @@ def build_server(session: LiraSession) -> MCPServer:
         finally:
             session.close()
 
-    mcp = MCPServer("lira-sapr", version=__version__, instructions=INSTRUCTIONS, lifespan=lifespan)
-    file_tools.register(mcp, session)
+    instructions = INSTRUCTIONS + (SCRIPT_INSTRUCTIONS if scripts else "")
+    mcp = MCPServer("lira-sapr", version=__version__, instructions=instructions, lifespan=lifespan)
+    file_tools.register(mcp, session, scripts)
     tables.register(mcp, session)
     editing.register(mcp, session)
     analysis.register(mcp, session)
     results.register(mcp, session)
-    script.register(mcp, session)
+    if scripts:
+        script.register(mcp, session)
     dialogs.register(mcp, session)
 
     @mcp.resource(

@@ -46,7 +46,9 @@ def main() -> None:
         sys.exit(2)
     setup_logging(settings.log_file)
     logging.getLogger(__name__).info("lira-sapr-mcp %s starting", __version__)
-    build_server(LiraSession(settings)).run("stdio")
+    scripts = "--no-scripts" not in args
+    logging.getLogger(__name__).info("scripts %s", "on" if scripts else "off (--no-scripts)")
+    build_server(LiraSession(settings), scripts=scripts).run("stdio")
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ from lira_sapr_mcp.tools.common import (
 )
 
 
-def register(mcp: MCPServer, session: LiraSession) -> None:
+def register(mcp: MCPServer, session: LiraSession, scripts: bool = True) -> None:
     @mcp.tool(annotations=READ_ONLY)
     @lira_errors
     async def lira_status() -> dict[str, Any]:
@@ -31,6 +31,8 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         LIRA release, and the tools it cannot run. Does not start LIRA.
         """
         status = session.status()
+        if not scripts:
+            status["scripts"] = "off: the server was started with --no-scripts"
         if status["connected"]:
             missing = unavailable_tools(session.adapter.capabilities)
             if missing:

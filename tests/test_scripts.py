@@ -64,6 +64,26 @@ def test_odd_and_large_results_are_made_safe():
 
 
 @pytest.mark.anyio
+async def test_no_scripts_hides_the_tool_and_status_says_so(tmp_path):
+    session, _ = fake_session(tmp_path)
+    mcp = build_server(session, scripts=False)
+    async with Client(mcp) as client:
+        tools = {t.name for t in (await client.list_tools()).tools}
+        status = (await client.call_tool("lira_status", {})).structured_content
+    assert "lira_run_script" not in tools and "lira_status" in tools
+    assert "--no-scripts" in status["scripts"]
+    assert "lira_run_script runs" not in mcp.instructions
+
+
+@pytest.mark.anyio
+async def test_scripts_are_on_by_default(tmp_path):
+    async with Client(build_server(fake_session(tmp_path)[0])) as client:
+        tools = {t.name for t in (await client.list_tools()).tools}
+        status = (await client.call_tool("lira_status", {})).structured_content
+    assert "lira_run_script" in tools and "scripts" not in status
+
+
+@pytest.mark.anyio
 async def test_script_tool_sees_the_adapter_and_backs_up(tmp_path):
     session, _ = fake_session(tmp_path)
     model = tmp_path / "frame.lir"
