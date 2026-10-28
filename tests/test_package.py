@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,20 @@ def test_wheel_carries_reference_and_entry_point(tmp_path):
         entry_points = zf.read(f"lira_sapr_mcp-{__version__}.dist-info/entry_points.txt")
     assert "lira_sapr_mcp/reference/tables.md" in names
     assert b"lira-sapr-mcp = lira_sapr_mcp.__main__:main" in entry_points
+
+
+@pytest.mark.anyio
+async def test_tools_page_lists_every_tool(tmp_path):
+    """docs/tools.md is the users' list of tools: it must not fall behind the server."""
+    from fakes import fake_session
+    from lira_sapr_mcp.server import build_server
+
+    page = (Path(__file__).parents[1] / "docs" / "tools.md").read_text(encoding="utf-8")
+    async with Client(build_server(fake_session(tmp_path)[0])) as client:
+        tools = {t.name for t in (await client.list_tools()).tools}
+    documented = set(re.findall(r"^\| `(lira_\w+)` \|", page, re.M))
+    assert documented == tools
+    assert f"{len(tools)} инструмент" in page
 
 
 @pytest.mark.anyio

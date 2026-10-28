@@ -26,67 +26,104 @@ MCP-сервер, через который ИИ-агент управляет �
 - **Скрипт агента:** для всего остального агент выполняет свой Python-код с объектами
   ЛИРЫ.
 
+Все 41 инструмент с описанием — в [docs/tools.md](docs/tools.md).
+
 ## Что нужно
 
 - Windows и ЛИРА-САПР 2024 R2 или новее с действующей лицензией. ЛИРА работает с
   окном на том же компьютере; сервер запускает её сам, если она не запущена.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) — он сам поставит
-  нужный Python и библиотеки.
+  нужный Python и библиотеки. Установка uv в PowerShell:
 
-## Установка и подключение
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
 
-Скачайте папку проекта и выполните в ней `uv sync`. Команда запуска сервера для любого
-MCP-клиента: `uv --directory <папка проекта> run lira-sapr-mcp`.
+## Подключение к агенту
 
-Claude Code:
+Сервер ставить отдельно не нужно: агент запускает его командой `uvx`, которая при
+первом запуске скачивает сервер с GitHub и собирает его в отдельном окружении (около
+минуты), а потом берёт из кэша.
+
+Команда запуска сервера:
 
 ```bash
-claude mcp add lira-sapr -- uv --directory "C:\path\to\lira-sapr-mcp" run lira-sapr-mcp
+uvx --from git+https://github.com/EvgenVer/lira-sapr-mcp lira-sapr-mcp
 ```
 
-Codex (`%USERPROFILE%\.codex\config.toml`):
+**Claude Code** — в терминале:
+
+```bash
+claude mcp add lira-sapr -- uvx --from git+https://github.com/EvgenVer/lira-sapr-mcp lira-sapr-mcp
+```
+
+**Codex** — в файле `%USERPROFILE%\.codex\config.toml`:
 
 ```toml
 [mcp_servers.lira-sapr]
-command = "uv"
-args = ["--directory", "C:\\path\\to\\lira-sapr-mcp", "run", "lira-sapr-mcp"]
+command = "uvx"
+args = ["--from", "git+https://github.com/EvgenVer/lira-sapr-mcp", "lira-sapr-mcp"]
 ```
 
-Claude Desktop, Cursor и другие клиенты с JSON-настройкой:
+**Claude Desktop, Cursor и другие клиенты с JSON-настройкой** (в Claude Desktop это
+файл `claude_desktop_config.json`: Settings → Developer → Edit Config):
 
 ```json
 {
   "mcpServers": {
     "lira-sapr": {
-      "command": "uv",
-      "args": ["--directory", "C:\\path\\to\\lira-sapr-mcp", "run", "lira-sapr-mcp"]
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/EvgenVer/lira-sapr-mcp", "lira-sapr-mcp"]
     }
   }
 }
 ```
 
-Без `uv sync` можно запускать через `uvx`: он сам соберёт сервер в отдельном окружении.
-Команда для клиента тогда `uvx --from C:\path\to\lira-sapr-mcp lira-sapr-mcp` (после
-публикации на GitHub — `uvx --from git+<адрес репозитория> lira-sapr-mcp`).
+После настройки перезапустите агента и попросите его вызвать `lira_status`: он покажет
+найденные версии ЛИРЫ и какая используется.
 
-Первым делом попросите агента вызвать `lira_status`: он покажет найденные версии ЛИРЫ.
-Настройки, журнал и решение проблем — в [docs/operations.md](docs/operations.md).
+**Обновление.** `uvx` держит собранный сервер в кэше. Чтобы взять новую версию с GitHub,
+выполните один раз и перезапустите агента:
+
+```bash
+uvx --refresh --from git+https://github.com/EvgenVer/lira-sapr-mcp lira-sapr-mcp --version
+```
+
+**Без доступа к GitHub.** Скачайте папку проекта и укажите её вместо адреса:
+`uvx --from C:\path\to\lira-sapr-mcp lira-sapr-mcp`.
+
+Настройки сервера (версия ЛИРЫ, тайм-ауты), журнал и решение проблем —
+в [docs/operations.md](docs/operations.md).
 
 ## Важно знать
 
 - **Скрипт агента получает полный доступ** к ЛИРЕ, файлам и Python на вашем компьютере
-  (`lira_run_script`). Подключайте сервер только к агенту, которому доверяете, и
-  следите за тем, что он запускает.
+  (`lira_run_script`). Он включён по умолчанию: через него агент делает то, чего нет в
+  остальных инструментах. Подключайте сервер только к агенту, которому доверяете, и
+  следите за тем, что он запускает. Чтобы выключить скрипты, добавьте флаг
+  `--no-scripts` в конец команды запуска — например, в Codex
+  `args = ["--from", "git+https://github.com/EvgenVer/lira-sapr-mcp", "lira-sapr-mcp", "--no-scripts"]`.
 - Перед первой правкой или перезаписью модели сервер кладёт её копию в папку
   `lira-mcp-backups` рядом с моделью и никогда не удаляет копии.
+- **Нагрузки** в API ЛИРЫ задать нельзя, поэтому сервер меняет их, пересобирая модель
+  через текстовый формат, и сверяет результат с оригиналом. Модели с нормами сочетаний,
+  отличными от тех, что ЛИРА даёт модели из текста, он не меняет: пересборка сменила бы
+  виды загружений. Такие нагрузки правьте в окне ЛИРЫ.
 - ЛИРА хранит результаты расчёта по имени модели: одноимённые модели из разных папок
   делят результаты.
 - Проверено на ЛИРА-САПР 2024 R2.3. Версии 2025 и 2026 поддерживаются тем же кодом,
   но пока не проверены. Если у вас 2025 или 2026, пришлите отчёт
-  `uv run lira-sapr-mcp --diagnose` (ЛИРУ он не запускает; перед отправкой посмотрите
+  `uvx --from git+https://github.com/EvgenVer/lira-sapr-mcp lira-sapr-mcp --diagnose`
+  (ЛИРУ он не запускает; отчёт появится в текущей папке; перед отправкой посмотрите
   его — там пути папок).
 
-## Документация
+## Для разработчиков
 
-Как устроен сервер, какие решения приняты и что проверено — сайт документации в
-`docs/` (`uv run zensical serve`).
+```bash
+uv sync
+uv run pytest
+```
+
+Живые тесты на ЛИРЕ — `uv run pytest -m lira`. Как устроен сервер, какие решения
+приняты и что проверено — сайт документации в `docs/`
+(`uv run zensical serve -a localhost:8010`).
