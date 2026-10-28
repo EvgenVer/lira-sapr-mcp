@@ -1,6 +1,9 @@
 import os
+import shutil
 import subprocess
 import sys
+import zipfile
+from pathlib import Path
 
 import pytest
 from mcp import Client
@@ -21,6 +24,23 @@ def test_cli_prints_version():
         check=True,
     )
     assert out.stdout.strip() == f"lira-sapr-mcp {__version__}"
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to build the wheel")
+def test_wheel_carries_reference_and_entry_point(tmp_path):
+    """What `uvx` installs: the table reference must ship inside the wheel."""
+    root = Path(__file__).parents[1]
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(tmp_path), str(root)],
+        capture_output=True,
+        check=True,
+    )
+    (wheel,) = tmp_path.glob("*.whl")
+    with zipfile.ZipFile(wheel) as zf:
+        names = set(zf.namelist())
+        entry_points = zf.read(f"lira_sapr_mcp-{__version__}.dist-info/entry_points.txt")
+    assert "lira_sapr_mcp/reference/tables.md" in names
+    assert b"lira-sapr-mcp = lira_sapr_mcp.__main__:main" in entry_points
 
 
 @pytest.mark.anyio
