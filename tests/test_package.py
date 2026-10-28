@@ -37,10 +37,13 @@ def test_wheel_carries_reference_and_entry_point(tmp_path):
         check=True,
     )
     (wheel,) = tmp_path.glob("*.whl")
+    info = f"lira_sapr_mcp-{__version__}.dist-info"
     with zipfile.ZipFile(wheel) as zf:
         names = set(zf.namelist())
-        entry_points = zf.read(f"lira_sapr_mcp-{__version__}.dist-info/entry_points.txt")
+        entry_points = zf.read(f"{info}/entry_points.txt")
+        metadata = zf.read(f"{info}/METADATA").decode("utf-8")
     assert "lira_sapr_mcp/reference/tables.md" in names
+    assert f"{info}/licenses/LICENSE" in names and "License-Expression: MIT" in metadata
     assert b"lira-sapr-mcp = lira_sapr_mcp.__main__:main" in entry_points
 
 

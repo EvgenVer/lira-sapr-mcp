@@ -3,13 +3,29 @@ name = "lira-sapr-mcp"
 version = "0.1.0"
 description = "MCP server that lets AI agents drive LIRA-SAPR (LIRA-FEM) through its COM API"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Evgenii Veremev" }]
 requires-python = ">=3.11"
+keywords = ["mcp", "lira-sapr", "lira-fem", "fem", "structural-analysis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "mcp>=2.3,<3",
     "openpyxl>=3.1",
     "pandas>=2.2",
     "pywin32>=311; sys_platform == 'win32'",
 ]
+
+[project.urls]
+Repository = "https://github.com/EvgenVer/lira-sapr-mcp"
+Documentation = "https://github.com/EvgenVer/lira-sapr-mcp#readme"
 
 [project.scripts]
 lira-sapr-mcp = "lira_sapr_mcp.__main__:main"
