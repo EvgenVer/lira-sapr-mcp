@@ -137,7 +137,8 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         model: .lir path (may be closed), open model, or default the model analysed last.
         nodes: [1, 5] or "1-10 15" (default all); load_cases: default all. Components:
         X Y Z (in the displacement unit set in LIRA), UX UY UZ (rad). Dynamic load cases
-        give a row per shape ("shape" = mode number).
+        give a row per shape ("shape" = mode number) and LIRA's summary over the shapes
+        ("shape": "sum", the values LIRA shows as summary).
         """
         path = await model_path(model)
         rows = await session.run(
@@ -171,7 +172,8 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         Qx, Qy (force/length), Rz (soil pressure); solid: Nx, Ny, Nz, Txy, Txz, Tyz;
         special, special_58_59, special_310, special_264: their forces.
         Units are those set in LIRA and are listed per component. One row per element,
-        load case, shape (dynamic load cases only: the mode number) and design section
+        load case, shape (dynamic load cases only: the mode number, and "sum" for LIRA's
+        summary over the shapes, the values to check sections with) and design section
         (bars: section 1 = start; set the count in Elements_DesignSectionsCount).
         families: e.g. ["bar"] (default all); query arguments apply within each family.
         """

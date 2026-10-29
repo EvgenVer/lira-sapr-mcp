@@ -191,6 +191,10 @@ async def test_plates_and_dynamic_shapes_of_example_04(mcp, workdir):
         moved = await client.call_tool(
             "lira_node_displacements", {"model": path, "nodes": "100", "load_cases": [4]}
         )
+        plate109 = await client.call_tool(
+            "lira_element_forces",
+            {"model": path, "elements": "109", "load_cases": [4], "top": None},
+        )
         listed = await client.call_tool("lira_load_combinations", {"model": path})
         dcl_forces = await client.call_tool(
             "lira_combination_forces",
@@ -240,10 +244,20 @@ async def test_plates_and_dynamic_shapes_of_example_04(mcp, workdir):
     assert set(families) >= {"bar", "plate"}
     plate = families["plate"]
     assert {"Mx", "My", "Qx"} <= set(plate["units"])
-    assert {r["shape"] for r in plate["rows"]} <= {1, 5, 11}
+    assert {r["shape"] for r in plate["rows"]} <= {1, 5, 11, "sum"}
     assert plate["extremes"]["Mx"]["max"]["at"]["case"] == 4
     d = moved.structured_content
-    assert sorted(r["shape"] for r in d["rows"]) == [1, 5, 11]
+    by_shape = {r["shape"]: r for r in d["rows"]}
+    assert set(by_shape) == {1, 5, 11, "sum"}
+    # LIRA's summary: the square root of the sum of squares of the shapes, with a sign.
+    for c in ("X", "Z"):
+        srss = sum(by_shape[s][c] ** 2 for s in (1, 5, 11)) ** 0.5
+        assert abs(by_shape["sum"][c]) == pytest.approx(srss, rel=1e-5)
+    rows = plate109.structured_content["families"]["plate"]["rows"]
+    mx = {r["shape"]: r["Mx"] for r in rows}
+    assert set(mx) == {1, 5, 11, "sum"}
+    srss = sum(mx[s] ** 2 for s in (1, 5, 11)) ** 0.5
+    assert abs(mx["sum"]) == pytest.approx(srss, rel=1e-5)
 
 
 EXAMPLE_02 = (

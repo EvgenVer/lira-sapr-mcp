@@ -327,3 +327,31 @@ def test_threshold_applies_to_the_envelope_not_before_it():
 def test_top_must_be_positive():
     with pytest.raises(LiraInputError, match="at least 1"):
         rs.summarize(rows(), ["N"], top=0)
+
+
+class _Infos:
+    """LiraResAPI's load case infos: (number, deformed shapes, summary shape count)."""
+
+    def __init__(self, *cases):
+        self.items = [_Info(*c) for c in cases]
+        self.Count = len(self.items)
+
+    def Item(self, i):
+        return self.items[i]
+
+
+class _Info:
+    def __init__(self, number, shapes, summary):
+        self.Number, self.SummaryShapeCount = number, summary
+        self.DeformedShapes = type("Longs", (), {"AddToString": lambda _: shapes})()
+
+
+def test_a_dynamic_load_case_adds_its_summary_shape():
+    from lira_sapr_mcp.adapters.results import _shape_label, _shapes
+
+    infos = _Infos((1, "1", 0), (4, "1,5,11", 1))
+
+    assert _shapes(infos, None) == [(1, [(1, 1)]), (4, [(1, 1), (2, 5), (3, 11)])]
+    shapes = _shapes(infos, [4], summary=True)
+    assert shapes == [(4, [(1, 1), (2, 5), (3, 11), (-1, -1)])]
+    assert [_shape_label(mode) for _, mode in shapes[0][1]] == [1, 5, 11, "sum"]

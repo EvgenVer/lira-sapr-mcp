@@ -43,7 +43,7 @@ flowchart LR
 | Таблицы ввода | `lira_list_input_tables`, `lira_read_table`, `lira_write_table` | `tools/tables.py` |
 | Нагрузки и текстовый формат | `lira_read_loads`, `lira_set_loads`, `lira_import_text_model`, `lira_export_text` | `tools/tables.py` |
 | Расчёт | `lira_run_analysis`, `lira_analysis_status`, `lira_stop_analysis`, `lira_analysis_protocol`, `lira_delete_results` | `tools/analysis.py` |
-| Результаты | `lira_node_displacements`, `lira_element_forces` (стержни, пластины, объёмные и специальные КЭ; формы динамических загружений) | `tools/results.py` |
+| Результаты | `lira_node_displacements`, `lira_element_forces` (стержни, пластины, объёмные и специальные КЭ; формы динамических загружений и их суммарные значения — строка `shape: "sum"`) | `tools/results.py` |
 | РСН и РСУ | `lira_load_combinations`, `lira_combination_displacements`, `lira_combination_forces` (по предельным состояниям), `lira_design_forces` (с критерием, группой и составом загружений) | `tools/results.py` |
 | Динамика, арматура, узловые нагрузки | `lira_periods` (периоды, частоты, модальные массы), `lira_reinforcement` (подобранная арматура стержней и пластин, трещины), `lira_fragment_loads`, `lira_punching_loads` | `tools/results.py` |
 | Аргументы запроса результатов | у всех инструментов результатов, кроме списков РСН и периодов: `components`, `sort_by`, `by_abs`, `top`, `threshold`, `envelope`, `export_path` (см. «Сервисы») | `tools/results.py` |

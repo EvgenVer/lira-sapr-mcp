@@ -4,7 +4,10 @@ The library reads LIRA's result files by model name (no path), in fixed units: m
 radians, ton-force (tf) and their products. Indices: load cases and design sections from
 1, history 0 outside non-linear histories. A static load case has one deformed shape (1);
 a dynamic one has several, which displacements address by mode number (e.g. 1, 5, 11)
-and forces by position (1, 2, 3) - checked on a live LIRA 2024 R2.
+and forces by position (1, 2, 3) - checked on a live LIRA 2024 R2. Shape -1 is the
+summary shape of a dynamic load case (LIRA's "summary" values, combined over the shapes:
+the square root of the sum of squares, with a sign), in displacements and forces alike;
+the ForcesSum flag of the request changes nothing.
 """
 
 import logging
@@ -81,6 +84,8 @@ NO_DCF = (
 )
 
 
+# Shape -1 of a dynamic load case is LIRA's summary shape; rows label it "sum".
+SUMMARY_SHAPE, SUMMARY = -1, "sum"
 NO_DYNAMICS = "the model has no dynamic load cases, or run lira_run_analysis first"
 NO_DESIGN = (
     "no reinforcement was selected: set reinforced concrete design data and run "
@@ -207,14 +212,14 @@ class ResultsReader:
         )
         directions = _numbers(resp.Directions.AddToString())
         getters = {d: getattr(resp, f"GetNode{name}") for d, name in DISPLACEMENTS.items()}
-        shapes = _shapes(resp.LoadCases, cases)
+        shapes = _shapes(resp.LoadCases, cases, summary=True)
         rows = []
         for node in _numbers(resp.NodeNumbers.AddToString()):
             for case, modes in shapes:
                 for _, mode in modes:
                     row: dict[str, Any] = {"node": node, "case": case}
                     if len(modes) > 1:
-                        row["shape"] = mode
+                        row["shape"] = _shape_label(mode)
                     for d in directions:
                         if d in getters:
                             row[DISPLACEMENTS[d]] = float(getters[d](node, case, mode, 0))
@@ -239,7 +244,7 @@ class ResultsReader:
             "LoadCaseForces",
             lambda req: req.Elements.AddFromString(wanted),
         )
-        shapes = _shapes(resp.LoadCases, cases)
+        shapes = _shapes(resp.LoadCases, cases, summary=True)
         getters: dict[int, Any] = {}
         rows = []
         for el in elements:
@@ -253,7 +258,7 @@ class ResultsReader:
                     for section in range(1, sections + 1):
                         row: dict[str, Any] = {"family": family, "element": el, "case": case}
                         if len(modes) > 1:
-                            row["shape"] = mode
+                            row["shape"] = _shape_label(mode)
                         row["section"] = section
                         for name, get in components:
                             row[name] = float(get(el, section, case, position, 0))
@@ -526,7 +531,8 @@ class ResultsReader:
         rows = []
         for node in _numbers(resp.NodeNumbers.AddToString()):
             for case, modes in shapes:
-                # Shapes by position, as for element forces (not checked on a live model).
+                # Shapes by position, as for element forces (not checked on a live model,
+                # so neither is the summary shape: it is left out).
                 for position, mode in modes:
                     row: dict[str, Any] = {"node": node, "case": case}
                     if len(modes) > 1:
@@ -628,14 +634,25 @@ def _numbers(text: str) -> list[int]:
     return parse_numbers(str(text or "")) or []
 
 
-def _shapes(infos: Any, wanted: list[int] | None) -> list[tuple[int, list[tuple[int, int]]]]:
-    """Per load case: its deformed shapes as (position from 1, mode number)."""
+def _shapes(
+    infos: Any, wanted: list[int] | None, summary: bool = False
+) -> list[tuple[int, list[tuple[int, int]]]]:
+    """Per load case: its deformed shapes as (position from 1, mode number); with
+    ``summary``, a dynamic load case's summary shape follows as (-1, -1)."""
     out = []
     by_number = {int(infos.Item(i).Number): infos.Item(i) for i in range(infos.Count)}
     for case in _cases(infos, wanted):
-        modes = _numbers(by_number[case].DeformedShapes.AddToString()) or [1]
-        out.append((case, list(enumerate(modes, start=1))))
+        info = by_number[case]
+        modes = _numbers(info.DeformedShapes.AddToString()) or [1]
+        shapes = list(enumerate(modes, start=1))
+        if summary and len(modes) > 1 and int(info.SummaryShapeCount) > 0:
+            shapes.append((SUMMARY_SHAPE, SUMMARY_SHAPE))
+        out.append((case, shapes))
     return out
+
+
+def _shape_label(mode: int) -> int | str:
+    return SUMMARY if mode == SUMMARY_SHAPE else mode
 
 
 def _cases(infos: Any, wanted: list[int] | None) -> list[int]:
