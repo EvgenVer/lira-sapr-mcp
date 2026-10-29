@@ -44,7 +44,6 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         # LIRA analyses the file; a model we only read may be saved first (see adapter).
         session.backups.ensure(ref)
         status = await session.run(session.adapter.start_analysis, ref)
-        session.analysed[ref.lower()] = ref
         if not wait:
             return status
         return await wait_for_end(timeout_s or session.settings.analysis_timeout_s)
@@ -87,7 +86,6 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         before = await session.run(session.adapter.results_info, path)
         if before["present"]:
             await session.run(session.adapter.delete_results, path)
-        session.analysed.pop(path.lower(), None)
         return {"model": path, "deleted": before["present"], "results_before": before}
 
     @mcp.tool(annotations=READ_ONLY)

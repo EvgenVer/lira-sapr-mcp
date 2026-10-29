@@ -28,6 +28,7 @@ class FakeAdapter:
         self.analysis = "idle"
         self.analysed: str | None = None
         self.deleted: set[str] = set()
+        self.results_warnings: dict[str, str] = {}  # model path -> stale results warning
         self.dialogs_shown: list[Dialog] = []  # what LIRA's windows would show
 
     def connect(self) -> None:
@@ -155,7 +156,12 @@ class FakeAdapter:
     def results_info(self, model_path):
         if not Path(model_path).stem.startswith("frame") or model_path in self.deleted:
             return {"present": False}
-        return {"present": True, "nodes": 2, "elements": 3, "written": "2026-10-27T10:00:00"}
+        info = {"present": True, "nodes": 2, "elements": 3, "written": "2026-10-27T10:00:00"}
+        warning = self.results_warning(model_path)
+        return info | ({"warning": warning} if warning else {})
+
+    def results_warning(self, model_path):
+        return self.results_warnings.get(model_path)
 
     def delete_results(self, model_path):
         self.deleted.add(model_path)

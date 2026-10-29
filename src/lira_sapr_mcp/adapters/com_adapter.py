@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from lira_sapr_mcp.adapters import stamps
 from lira_sapr_mcp.adapters.analysis import (
     AnalysisState,
     make_event_handler,
@@ -86,6 +87,7 @@ class ComLiraAdapter:
         # document modified when a scratch input table is created and removed in it.
         self._dirty_by_reads: set[str] = set()
         self.analysis = AnalysisState()
+        self._stamped: float | None = None  # start time of the analysis stamped last
         self._events: Any = None
         self.results = ResultsReader(install)
 
@@ -173,8 +175,13 @@ class ComLiraAdapter:
         may have made in LIRA meanwhile are neither lost nor left out of an analysis."""
         if self._maybe_edited(doc) and str(doc.PathName).lower().endswith(".lir"):
             log.info("saving %s before closing or analysing it", doc.PathName)
+            path = Path(str(doc.PathName))
+            before = path.stat().st_mtime if path.exists() else 0.0
             self._changed(doc)
             self._call("Save", doc.Save, False)
+            work = self._work()
+            if work:  # the results of a model we only read stay its results
+                stamps.saved_unchanged(work, path, before)
 
     @contextmanager
     def _reading(self, doc: Any) -> Iterator[None]:
@@ -474,6 +481,10 @@ class ComLiraAdapter:
     def directories(self) -> dict[str, str]:
         return lira_directories(self.install.year)
 
+    def _work(self) -> Path | None:
+        work = self.directories().get("WorkDirectory")
+        return Path(work) if work else None
+
     def export_text(self, ref: str, timeout_s: float = 120.0) -> str:
         """The model in LIRA's text format, via the menu command "Create text file".
 
@@ -551,7 +562,17 @@ class ComLiraAdapter:
             raise LiraComError(f"LIRA refused to start the analysis. {log_text.strip()}")
         return self.analysis.as_dict()
 
+    def _stamp_finished(self) -> None:
+        """Stamp the results of the server's last analysis once it has finished."""
+        a = self.analysis
+        if a.status == "finished" and a.model and self._stamped != a.started_at:
+            work = self._work()
+            if work:
+                stamps.write_stamp(work, Path(a.model))
+            self._stamped = a.started_at
+
     def analysis_status(self) -> dict:
+        self._stamp_finished()
         status = self.analysis.as_dict()
         if self.analysis.done and self.analysis.model:
             text = self.protocol(self.analysis.model)
@@ -566,23 +587,28 @@ class ComLiraAdapter:
         self._call("StopAnalysis", self._app.StopAnalysis)
 
     def results_info(self, model_path: str) -> dict[str, Any]:
-        """Whether LIRA keeps analysis results under this model's name, their size and time.
-
-        LIRA keeps them in its work folder by model name only, so they may belong to an
-        older version of the model or to another model of the same name. The model file's
-        time cannot tell: the server saves models it only read (see _save_possible_edits).
-        """
+        """Whether LIRA keeps analysis results under this model's name, their size and time,
+        and a warning when they may belong to an older version of the model or to another
+        model of the same name (see stamps)."""
         main = self.results.main_data(model_path)
         if main is None:
             return {"present": False}
         info: dict[str, Any] = {"present": True, **main}
-        work = self.directories().get("WorkDirectory")
-        stem = Path(model_path).stem
-        marker = Path(work) / f"{stem}#00.{stem}" if work else None
+        work = self._work()
+        marker = stamps.results_marker(work, Path(model_path).stem) if work else None
         if marker and marker.exists():
             written = datetime.fromtimestamp(marker.stat().st_mtime)
             info["written"] = written.isoformat(timespec="seconds")
+        warning = self.results_warning(model_path)
+        if warning:
+            info["warning"] = warning
         return info
+
+    def results_warning(self, model_path: str) -> str | None:
+        """Why the results under this model's name may not be its own, or None."""
+        self._stamp_finished()
+        work = self._work()
+        return stamps.results_warning(work, Path(model_path)) if work else None
 
     def delete_results(self, model_path: str) -> None:
         if (
@@ -592,6 +618,9 @@ class ComLiraAdapter:
         ):
             raise LiraInputError(f"The analysis of {model_path} is still running")
         self._call("DeleteResults", self._app.DeleteResults, model_path)
+        work = self._work()
+        if work:
+            stamps.remove_stamp(work, Path(model_path).stem)
 
     def protocol(self, model_path: str) -> str | None:
         work = self.directories().get("WorkDirectory")

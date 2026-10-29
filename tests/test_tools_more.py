@@ -27,7 +27,6 @@ async def test_analysis_tools_run_report_and_stop(tmp_path):
         await call(client, "lira_open_model", {"path": str(model)})
         res = await call(client, "lira_run_analysis", {})
         assert res.structured_content["status"] == "finished"
-        assert session.analysed == {str(model).lower(): str(model)}
         backups = list((tmp_path / "lira-mcp-backups").glob("frame_*.lir"))
         assert len(backups) == 1
         status = await call(client, "lira_analysis_status", {})

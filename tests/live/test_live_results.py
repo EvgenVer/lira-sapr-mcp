@@ -75,6 +75,49 @@ async def analyse_open(client, path):
     return res.structured_content
 
 
+async def test_results_of_same_named_and_changed_models_carry_warnings(mcp, workdir):
+    """LIRA keeps results by model name only: the server says whose they are."""
+    a, b = workdir / "a" / "lmcp_res_twin.lir", workdir / "b" / "lmcp_res_twin.lir"
+
+    async def forces(client, path):
+        res = await client.call_tool("lira_element_forces", {"model": str(path), "top": 1})
+        assert not res.is_error, res.content
+        return res.structured_content
+
+    async with Client(mcp) as client:
+        for path in (a, b):
+            path.parent.mkdir(exist_ok=True)
+            made = await client.call_tool(
+                "lira_import_text_model", {"text": FRAME, "save_as": str(path)}
+            )
+            assert not made.is_error, made.content
+            await client.call_tool("lira_close_model", {"model": str(path)})
+        await client.call_tool("lira_open_model", {"path": str(a)})
+        await analyse_open(client, str(a))
+        fresh = await forces(client, a)
+        # Only reading the model makes the server save it on closing: still a's results.
+        await client.call_tool("lira_open_model", {"path": str(a)})
+        await client.call_tool("lira_model_summary", {})
+        await client.call_tool("lira_close_model", {"model": str(a)})
+        time.sleep(1.5)
+        after_read = await forces(client, a)
+        await client.call_tool("lira_open_model", {"path": str(b)})
+        await analyse_open(client, str(b))
+        twin = await forces(client, a)
+        await client.call_tool("lira_open_model", {"path": str(b)})
+        sections = [[1, 5], [2, 5], [3, 5]]
+        await client.call_tool(
+            "lira_write_table", {"table": "Elements_DesignSectionsCount", "rows": sections}
+        )
+        await client.call_tool("lira_save_model", {})
+        await client.call_tool("lira_close_model", {"model": str(b)})
+        changed = await forces(client, b)
+    assert "warning" not in fresh
+    assert "warning" not in after_read
+    assert str(b) in twin["warning"] and "same name" in twin["warning"]
+    assert "out of date" in changed["warning"]
+
+
 async def test_results_of_a_model_never_analysed(mcp, workdir):
     path = str(workdir / "lmcp_res_none.lir")
     async with Client(mcp) as client:

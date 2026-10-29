@@ -106,17 +106,16 @@ async def test_element_forces_are_answered_per_family(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_same_name_models_get_a_warning(tmp_path):
-    session, _ = fake_session(tmp_path)
-    session.analysed[str(tmp_path / "a" / "frame.lir").lower()] = "a"
+async def test_results_that_may_not_be_the_models_own_carry_a_warning(tmp_path):
+    session, adapter = fake_session(tmp_path)
+    model = str(tmp_path / "frame.lir")
+    adapter.results_warnings[model] = "These results are of D:\\b\\frame.lir"
     async with Client(build_server(session)) as client:
-        res = await client.call_tool(
-            "lira_node_displacements", {"model": str(tmp_path / "frame.lir"), "nodes": "2"}
-        )
+        res = await client.call_tool("lira_node_displacements", {"model": model, "nodes": "2"})
     out = res.structured_content
     assert out["extremes"]["Z"]["min"]["value"] == pytest.approx(-1.25)
     assert out["units"]["Z"] == "mm"
-    assert "same name" in out["warning"]
+    assert out["warning"] == "These results are of D:\\b\\frame.lir"
 
 
 @pytest.mark.anyio

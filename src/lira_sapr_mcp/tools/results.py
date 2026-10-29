@@ -4,12 +4,11 @@ Every result tool takes the same query arguments (see QUERY_HELP) and runs them 
 one path: convert units -> envelope -> threshold -> extremes and top rows -> export.
 """
 
-from pathlib import Path
 from typing import Any, NamedTuple
 
 from mcp.server import MCPServer
 
-from lira_sapr_mcp.adapters.base import norm_path, parse_numbers
+from lira_sapr_mcp.adapters.base import parse_numbers
 from lira_sapr_mcp.adapters.results import FRAGMENT_KIND, PUNCHING_KIND, force_kinds
 from lira_sapr_mcp.services import results as rs
 from lira_sapr_mcp.services.session import LiraSession
@@ -62,20 +61,6 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
                 return last
         return await session.resolve(model)
 
-    def name_warning(path: str) -> str | None:
-        stem = Path(path).stem.lower()
-        others = [
-            p
-            for k, p in session.analysed.items()
-            if Path(k).stem == stem and norm_path(k) != norm_path(path)
-        ]
-        if others:
-            return (
-                f"LIRA keeps results by model name only: {others[0]} has the same name "
-                "and was analysed in this session, so these results may be its results"
-            )
-        return None
-
     async def lira_units() -> dict[str, str]:
         u = await session.run(session.adapter.units)
         return {
@@ -113,7 +98,7 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
             result = {"model": path} | next(iter(answers.values()), rs.summarize([], []))
         if q.export_path:
             result["export"] = rs.export(exported, export_units, q.export_path)
-        warning = name_warning(path)
+        warning = await session.run(session.adapter.results_warning, path)
         if warning:
             result["warning"] = warning
         return result
