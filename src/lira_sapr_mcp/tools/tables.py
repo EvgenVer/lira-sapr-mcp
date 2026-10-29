@@ -106,8 +106,9 @@ def register(mcp: MCPServer, session: LiraSession) -> None:
         LIRA has no API for loads, so the server rebuilds the model through LIRA's text
         format, copies every input table back, verifies tables and loads, and only then
         overwrites the file (after a backup). If verification fails, nothing changes.
-        Models whose combination norms differ from those LIRA gives a model rebuilt from
-        text are refused: the rebuild would change their load case kinds. Data that is
+        Models under combination norms other than LIRA's default (SP 20.13330), e.g. SNiP
+        2.01.07-85*, are refused: LIRA cannot restore their load case kinds after the
+        rebuild. Models with construction stages do not survive it either. Data that is
         neither in input tables nor in the text format cannot be verified: check the
         model in LIRA after this call.
         """

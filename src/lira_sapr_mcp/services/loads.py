@@ -11,7 +11,6 @@ Everything here runs on the COM thread.
   model stays untouched.
 """
 
-import contextlib
 import logging
 import shutil
 import tempfile
@@ -78,18 +77,20 @@ def _same_loads(a: list[Load], b: list[Load]) -> bool:
     return sorted(map(key, a)) == sorted(map(key, b))
 
 
-def _changed_kinds(before: list | None, now: list) -> list[str]:
-    """Load case kinds (column 4 of LoadCases) that the rebuild changed, as 'old -> new'.
+def _changed_kinds(before: list, now: list) -> list[str]:
+    """Load case kinds (column 4 of LoadCases) that differ after the rebuild, as 'old -> new'.
 
-    The text import gives the model LIRA's default combination norms, and LIRA maps
-    written kinds into the dictionary of those norms, so restoring LoadCases cannot undo
-    it: compare right after the import. Rows without a kind are left to the full check.
+    The text keeps kinds as SNiP-style codes and the import reads them in LIRA's default
+    combination norms (SP 20.13330), so every rebuild scrambles them. Writing LoadCases
+    back restores them only when the model uses those norms: LIRA maps the written names
+    into the dictionary of the default norms. Rows without a kind on either side are left to
+    the full check.
     """
-    old = {row[0]: row[3] for row in before or [] if len(row) > 3}
+    old = {row[0]: row[3] for row in before if len(row) > 3}
     return [
         f"{row[0]}: {old[row[0]]} -> {row[3]}"
         for row in now
-        if len(row) > 3 and old.get(row[0], row[3]) != row[3]
+        if len(row) > 3 and row[3] is not None and old.get(row[0]) not in (None, row[3])
     ]
 
 
@@ -113,19 +114,6 @@ def set_loads(adapter: Any, ref: str, loads: list[Load], cases: list[int] | None
     new = _import_text(adapter, model.render(), orig.title)
     new_ref = new.path or new.title
     try:
-        kinds = []
-        # If LIRA cannot build LoadCases, the full check below handles it as any table.
-        with contextlib.suppress(LiraError):
-            if before.get("LoadCases") is not None:
-                now = adapter.read_table(new_ref, "LoadCases")
-                kinds = _changed_kinds(before["LoadCases"], now)
-        if kinds:
-            raise LiraError(
-                "Loads were not changed: this model uses combination norms other than the "
-                "ones LIRA gives a model rebuilt from text, so the rebuild would change load "
-                f"case kinds ({'; '.join(kinds)}). LIRA 2024 R2's API cannot keep them; "
-                "change these loads in LIRA itself. The original model is untouched."
-            )
         restored, failed = [], {}
         for name, rows in before.items():
             if rows is None:
@@ -135,11 +123,28 @@ def set_loads(adapter: Any, ref: str, loads: list[Load], cases: list[int] | None
             except LiraError:
                 now = None
             if now != rows:
-                errors = adapter.write_table(new_ref, name, rows)
+                try:
+                    errors = [e.message for e in adapter.write_table(new_ref, name, rows)]
+                except LiraError as exc:  # LIRA refuses the whole table, e.g. LoadCases
+                    errors = [str(exc)]  # of a model with construction stages
                 if errors:
-                    failed[name] = [e.message for e in errors[:5]]
+                    failed[name] = errors[:5]
                 restored.append(name)
         after = _snapshot(adapter, new_ref)
+        # A table LIRA cannot build or refused to take is left to the full check below.
+        if "LoadCases" not in failed and None not in (
+            before.get("LoadCases"),
+            after.get("LoadCases"),
+        ):
+            kinds = _changed_kinds(before["LoadCases"], after["LoadCases"])
+            if kinds:
+                raise LiraError(
+                    "Loads were not changed: this model uses combination norms other than "
+                    "LIRA's default ones (SP 20.13330), and a model rebuilt from text gets "
+                    f"the default norms, so its load case kinds would change ({'; '.join(kinds)}"
+                    "). LIRA 2024 R2's API cannot keep other norms; change these loads in "
+                    "LIRA itself. The original model is untouched."
+                )
         differs = [n for n, rows in before.items() if rows is not None and after.get(n) != rows]
         got = TextModel.parse(adapter.export_text(new_ref)).loads()
         if differs or failed or not _same_loads(got, wanted):

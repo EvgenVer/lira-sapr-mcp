@@ -91,9 +91,40 @@ def test_changing_loads_of_own_model(lira, adapter, workdir):
         assert lira(adapter.read_table, str(model), name) == rows
 
 
+def test_changing_loads_keeps_kinds_of_default_norms(lira, adapter, workdir):
+    """A model under LIRA's default norms (SP 20.13330) whose engineer set various load
+    case kinds: the text import scrambles them, the restore of LoadCases brings them back."""
+    model = workdir / "lmcp_frame_kinds.lir"
+    four_cases = FRAME.replace(
+        "( 6/ 3 6 3 1 1/ )", "( 6/ 3 6 3 1 1/ 4 0 1 2 2/ 4 0 1 3 3/ 4 0 1 4 4/ )"
+    ).replace("( 7/ 1 10/ )", "( 7/ 1 10/ 2 5/ 3 2/ 4 1/ )")
+    lira(loads_service.import_text_model, adapter, four_cases, str(model))
+    kinds = {
+        1: "Постоянное ( P)",
+        2: "Кратк. доминир.1 ( Pt1)",
+        3: "Особое ( Ps)",
+        4: "Мгновенное(М)",
+    }
+    rows = [
+        [*r[:3], kinds[r[0]], *r[4:]] for r in lira(adapter.read_table, str(model), "LoadCases")
+    ]
+    assert lira(adapter.write_table, str(model), "LoadCases", rows) == []
+    lira(adapter.save_document, str(model))
+    cases = lira(adapter.read_table, str(model), "LoadCases")
+    assert [r[3] for r in cases] == list(kinds.values())
+
+    report = lira(loads_service.set_loads, adapter, str(model), [Load(1, 3, 6, 3, [12.5])], [1])
+
+    assert "LoadCases" in report["tables_restored_after_import"]  # the import scrambled them
+    assert lira(adapter.read_table, str(model), "LoadCases") == cases
+    loads = lira(loads_service.read_loads, adapter, str(model), [1])
+    assert [(d["target"], d["values"][0]) for d in loads] == [(3, 12.5)]
+
+
 def test_mismatching_rebuild_is_refused_and_original_untouched(lira, adapter, example):
-    """The example uses other combination norms than LIRA's default for imports, so the
-    rebuilt model's load case kinds differ: the server must refuse and change nothing."""
+    """The example uses other combination norms (SNiP 2.01.07-85*) than LIRA's default, so
+    its load case kinds cannot be restored after the rebuild: the server must refuse and
+    change nothing."""
     lira(adapter.open_document, str(example))
     original_bytes = example.read_bytes()
     original = as_loads(lira(loads_service.read_loads, adapter, str(example)))
@@ -106,7 +137,7 @@ def test_mismatching_rebuild_is_refused_and_original_untouched(lira, adapter, ex
     with pytest.raises(LiraError, match="combination norms") as err:
         lira(loads_service.set_loads, adapter, str(example), changed, [1])
 
-    assert "Мгновенное(М) -> Особое ( Ps)" in str(err.value)
+    assert "2: Длительное(Д) -> Постоянное ( P)" in str(err.value)
     assert "original model is untouched" in str(err.value)
 
     assert example.read_bytes() == original_bytes
